@@ -366,7 +366,7 @@ function App() {
       <div className="w-full h-screen bg-gray-900 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700">
           <h1 className="text-4xl font-bold text-white text-center mb-2 tracking-wider">
-            CRACK COCAINE 3D
+            BLOCKS 3D
           </h1>
           <p className="text-gray-400 text-center mb-8">
             Structural Strategy Game

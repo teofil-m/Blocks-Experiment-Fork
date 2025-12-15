@@ -445,9 +445,6 @@ function App() {
                     Join
                   </button>
                 </div>
-                <p className="text-[10px] text-gray-600 text-center mt-2">
-                  Requires local server (node server.js)
-                </p>
               </>
             ) : (
               <div className="text-center py-6 bg-gray-900 rounded-xl border border-gray-700 animate-in fade-in zoom-in duration-300">

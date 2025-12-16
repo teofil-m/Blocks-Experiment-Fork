@@ -20,28 +20,39 @@ const rooms = new Map();
 // {
 //   id: string,
 //   white: socketId,
+//   whiteName: string,
 //   black: socketId,
+//   blackName: string,
 //   spectators: []
 // }
 
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
-  socket.on("create_room", () => {
+  socket.on("create_room", (data) => {
+    // Data might contain playerName
+    const playerName = data?.playerName || "White";
     const roomId = Math.random().toString(36).substr(2, 4).toUpperCase();
+
     rooms.set(roomId, {
       id: roomId,
       white: socket.id,
+      whiteName: playerName,
       black: null,
+      blackName: null,
       spectators: [],
     });
 
     socket.join(roomId);
     socket.emit("room_created", { roomId });
-    console.log(`Room ${roomId} created by ${socket.id}`);
+    console.log(`Room ${roomId} created by ${socket.id} (${playerName})`);
   });
 
-  socket.on("join_room", (roomId) => {
+  socket.on("join_room", (data) => {
+    // Support both old string format and new object format
+    const roomId = typeof data === "string" ? data : data.roomId;
+    const playerName = typeof data === "object" ? data.playerName : "Black";
+
     const room = rooms.get(roomId);
 
     if (!room) {
@@ -52,14 +63,19 @@ io.on("connection", (socket) => {
     // If room has no black player, join as black
     if (!room.black) {
       room.black = socket.id;
+      room.blackName = playerName;
       socket.join(roomId);
 
       // Notify everyone game starts
       io.to(roomId).emit("game_start", {
         whiteId: room.white,
         blackId: room.black,
+        whiteName: room.whiteName,
+        blackName: room.blackName,
       });
-      console.log(`Game started in room ${roomId}`);
+      console.log(
+        `Game started in room ${roomId}. ${room.whiteName} vs ${room.blackName}`
+      );
     } else {
       // Room full
       socket.emit("error", { message: "Room is full" });

@@ -50,24 +50,11 @@ export type NetworkMessage =
     }
   | {
       type: "MOVE";
-      ZS_block: BlockData;
-      nextPlayer: Player;
-      whiteTime: number;
-      blackTime: number;
-    } // Legacy typo fix if any, keeping simple
-  | {
-      type: "MOVE";
-      KX_block: BlockData;
-      nextPlayer: Player;
-      whiteTime: number;
-      blackTime: number;
-    } // Legacy typo fix if any, keeping simple
-  | {
-      type: "MOVE";
       block: BlockData;
       nextPlayer: Player;
       whiteTime: number;
       blackTime: number;
+      isDraw?: boolean;
     }
   | { type: "RESET" }
   | { type: "OPPONENT_RESIGNED" };

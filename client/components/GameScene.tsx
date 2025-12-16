@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from "react";
+import React, { useRef, useMemo, useState, useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import {
   OrbitControls,
@@ -10,42 +10,54 @@ import {
 } from "@react-three/drei";
 import * as THREE from "three";
 import { BlockData, Orientation, Player, GridState } from "@/types";
-import { CUBE_SIZE, COLORS, GRID_SIZE } from "@/constants";
+import { COLORS, GRID_SIZE, CUBE_SIZE } from "@/constants";
 import { getGridBounds } from "@/utils/gameLogic";
 
 interface BlockProps {
+  id: string;
   x: number;
   y: number;
   orientation: Orientation;
   color: string;
   isGhost?: boolean;
   isValid?: boolean;
+  explosion?: { position: THREE.Vector3; time: number } | null;
+  physicsRegistry?: React.MutableRefObject<Map<string, PhysicsObject>>;
+}
+
+interface PhysicsObject {
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+  size: THREE.Vector3;
 }
 
 const Block3D: React.FC<BlockProps> = ({
+  id,
   x,
   y,
   orientation,
   color,
   isGhost,
   isValid,
+  explosion,
+  physicsRegistry,
 }) => {
   // Coords are now direct world space (scaled by CUBE_SIZE)
 
-  let posX = x * CUBE_SIZE;
-  let posY = y * CUBE_SIZE + CUBE_SIZE / 2; // Base sits on y=0 plane
+  let initialPosX = x * CUBE_SIZE;
+  let initialPosY = y * CUBE_SIZE + CUBE_SIZE / 2; // Base sits on y=0 plane
 
   let sizeArgs: [number, number, number] = [1, 1, 1];
 
   if (orientation === "vertical") {
     sizeArgs = [CUBE_SIZE * 0.96, CUBE_SIZE * 1.96, CUBE_SIZE * 0.96];
-    posY += CUBE_SIZE / 2;
+    initialPosY += CUBE_SIZE / 2;
   } else {
     sizeArgs = [CUBE_SIZE * 1.96, CUBE_SIZE * 0.96, CUBE_SIZE * 0.96];
-    posX += CUBE_SIZE / 2;
+    initialPosX += CUBE_SIZE / 2;
   }
 
-  const posZ = 0;
+  const initialPosZ = 0;
 
   const materialColor = isGhost ? (isValid ? color : COLORS.error) : color;
 
@@ -56,31 +68,289 @@ const Block3D: React.FC<BlockProps> = ({
   const yOffsetRef = useRef(isGhost ? 0 : 5);
   const yVel = useRef(0);
 
-  useFrame(() => {
+  // Physics Refs
+  const isDynamic = useRef(false);
+  const position = useRef(
+    new THREE.Vector3(initialPosX, initialPosY, initialPosZ)
+  );
+  const velocity = useRef(new THREE.Vector3(0, 0, 0));
+  const rotation = useRef(new THREE.Euler(0, 0, 0));
+  const angularVelocity = useRef(new THREE.Vector3(0, 0, 0));
+  const lastExplosionTime = useRef(0);
+
+  // Precompute local corners for physics collision
+  const localCorners = useMemo(() => {
+    const hx = sizeArgs[0] / 2;
+    const hy = sizeArgs[1] / 2;
+    const hz = sizeArgs[2] / 2;
+    return [
+      new THREE.Vector3(hx, hy, hz),
+      new THREE.Vector3(hx, hy, -hz),
+      new THREE.Vector3(hx, -hy, hz),
+      new THREE.Vector3(hx, -hy, -hz),
+      new THREE.Vector3(-hx, hy, hz),
+      new THREE.Vector3(-hx, hy, -hz),
+      new THREE.Vector3(-hx, -hy, hz),
+      new THREE.Vector3(-hx, -hy, -hz),
+    ];
+  }, [sizeArgs[0], sizeArgs[1], sizeArgs[2]]);
+
+  // Manage Physics Registry
+  useEffect(() => {
+    return () => {
+      if (physicsRegistry && !isGhost) {
+        physicsRegistry.current.delete(id);
+      }
+    };
+  }, [id, isGhost, physicsRegistry]);
+
+  useEffect(() => {
+    if (explosion && explosion.time !== lastExplosionTime.current && !isGhost) {
+      isDynamic.current = true;
+      lastExplosionTime.current = explosion.time;
+
+      // Calculate explosion force
+      const bombPos = explosion.position;
+      const myPos = position.current;
+
+      const dir = new THREE.Vector3().subVectors(myPos, bombPos);
+      const dist = dir.length();
+
+      // Normalize and add some upward bias
+      dir.normalize();
+      dir.y += 0.8; // Push up more to get a nice arc
+      dir.normalize();
+
+      // Force magnitude falls off with distance
+      const force = 35 / (dist + 0.5);
+
+      velocity.current.add(dir.multiplyScalar(force));
+
+      // Add random rotation
+      angularVelocity.current.set(
+        (Math.random() - 0.5) * 15,
+        (Math.random() - 0.5) * 15,
+        (Math.random() - 0.5) * 15
+      );
+    }
+  }, [explosion, isGhost]);
+
+  useFrame((state, delta) => {
     if (isGhost) return;
 
-    const tension = 0.12;
-    const damping = 0.6;
-
-    const scaleDiff = 1 - scaleRef.current;
-    if (Math.abs(scaleDiff) > 0.001 || Math.abs(scaleVel.current) > 0.001) {
-      scaleVel.current += scaleDiff * tension;
-      scaleVel.current *= damping;
-      scaleRef.current += scaleVel.current;
-      groupRef.current.scale.setScalar(scaleRef.current);
+    // Update Registry with current state
+    if (physicsRegistry) {
+      physicsRegistry.current.set(id, {
+        position: position.current.clone(),
+        quaternion: new THREE.Quaternion().setFromEuler(rotation.current),
+        size: new THREE.Vector3(...sizeArgs),
+      });
     }
 
-    const yDiff = 0 - yOffsetRef.current;
-    if (Math.abs(yDiff) > 0.001 || Math.abs(yVel.current) > 0.001) {
-      yVel.current += yDiff * tension;
-      yVel.current *= damping;
-      yOffsetRef.current += yVel.current;
-      groupRef.current.position.y = posY + yOffsetRef.current;
+    if (isDynamic.current) {
+      const dt = Math.min(delta, 0.05); // Cap delta time
+
+      // Physics Constants
+      const GRAVITY = -25;
+      const DAMPING = 0.99;
+      const ANGULAR_DAMPING = 0.98;
+      const FRICTION = 0.5;
+      const FLOOR_Y = 0;
+
+      // 1. Gravity
+      velocity.current.y += GRAVITY * dt;
+
+      // 2. Predict Position for Collision
+      const nextPos = position.current
+        .clone()
+        .addScaledVector(velocity.current, dt);
+
+      // 3. Update Rotation (Quaternion Integration)
+      const q = new THREE.Quaternion().setFromEuler(rotation.current);
+      const w = angularVelocity.current;
+      const wLen = w.length();
+      if (wLen > 0.0001) {
+        const axis = w.clone().normalize();
+        const angle = wLen * dt;
+        const qDelta = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+        q.premultiply(qDelta);
+      }
+
+      const totalForce = new THREE.Vector3(0, 0, 0);
+      const totalTorque = new THREE.Vector3(0, 0, 0);
+      let contactCount = 0;
+
+      // 4a. Floor Collision (Corner Penalty Method)
+      localCorners.forEach((localCorner) => {
+        // Transform local corner to world space
+        const worldCorner = localCorner.clone().applyQuaternion(q).add(nextPos);
+
+        if (worldCorner.y < FLOOR_Y) {
+          contactCount++;
+          const depth = FLOOR_Y - worldCorner.y;
+
+          // Velocity at contact point: v_point = v_cm + w x r
+          const r = worldCorner.clone().sub(nextPos);
+          const vPoint = velocity.current
+            .clone()
+            .add(new THREE.Vector3().crossVectors(w, r));
+
+          const K = 300;
+          const D = 15;
+
+          const vNormal = vPoint.y; // Up is normal
+          const fSpring = K * depth;
+          const fDamper = -D * vNormal;
+
+          let fY = Math.max(0, fSpring + fDamper);
+
+          const vTangential = new THREE.Vector3(vPoint.x, 0, vPoint.z);
+          const fFriction = vTangential.multiplyScalar(-FRICTION * 50 * dt);
+
+          const force = new THREE.Vector3(0, fY, 0).add(fFriction);
+
+          totalForce.add(force);
+          totalTorque.add(new THREE.Vector3().crossVectors(r, force));
+        }
+      });
+
+      // 4b. Block-Block Collision
+      if (physicsRegistry) {
+        physicsRegistry.current.forEach((other, otherId) => {
+          if (otherId === id) return;
+
+          // Simple Broadphase
+          if (nextPos.distanceToSquared(other.position) > 16) return;
+
+          const otherInvQ = other.quaternion.clone().invert();
+          const hx = other.size.x / 2;
+          const hy = other.size.y / 2;
+          const hz = other.size.z / 2;
+
+          localCorners.forEach((localCorner) => {
+            const worldCorner = localCorner
+              .clone()
+              .applyQuaternion(q)
+              .add(nextPos);
+
+            // Transform world corner to Other's local space
+            const localToOther = worldCorner
+              .clone()
+              .sub(other.position)
+              .applyQuaternion(otherInvQ);
+
+            // Check AABB in Other's local space
+            if (
+              Math.abs(localToOther.x) < hx &&
+              Math.abs(localToOther.y) < hy &&
+              Math.abs(localToOther.z) < hz
+            ) {
+              contactCount++;
+
+              // Find smallest penetration depth
+              const dx = hx - Math.abs(localToOther.x);
+              const dy = hy - Math.abs(localToOther.y);
+              const dz = hz - Math.abs(localToOther.z);
+
+              // Normal in Other's Local Space
+              const normalLocal = new THREE.Vector3();
+              let pen = 0;
+
+              if (dx < dy && dx < dz) {
+                pen = dx;
+                normalLocal.set(Math.sign(localToOther.x), 0, 0);
+              } else if (dy < dz) {
+                pen = dy;
+                normalLocal.set(0, Math.sign(localToOther.y), 0);
+              } else {
+                pen = dz;
+                normalLocal.set(0, 0, Math.sign(localToOther.z));
+              }
+
+              // Normal in World Space
+              const normalWorld = normalLocal
+                .clone()
+                .applyQuaternion(other.quaternion)
+                .normalize();
+
+              // Penalty Force
+              const r = worldCorner.clone().sub(nextPos);
+              const vPoint = velocity.current
+                .clone()
+                .add(new THREE.Vector3().crossVectors(w, r));
+
+              // Project velocity onto normal
+              const vRel = vPoint.dot(normalWorld);
+
+              const K = 400; // Stiffer for blocks
+              const D = 20;
+
+              const fMag = Math.max(0, K * pen - D * vRel);
+              const force = normalWorld.multiplyScalar(fMag);
+
+              totalForce.add(force);
+              totalTorque.add(new THREE.Vector3().crossVectors(r, force));
+            }
+          });
+        });
+      }
+
+      if (contactCount > 0) {
+        velocity.current.add(totalForce.multiplyScalar(dt)); // F=ma, assume m=1
+        angularVelocity.current.add(totalTorque.multiplyScalar(dt * 3)); // Approximate inertia
+      }
+
+      // 5. Integration
+      velocity.current.multiplyScalar(DAMPING);
+      angularVelocity.current.multiplyScalar(ANGULAR_DAMPING);
+      position.current.addScaledVector(velocity.current, dt);
+      rotation.current.setFromQuaternion(q);
+
+      // 6. Stabilization (Sleep)
+      if (
+        contactCount > 0 &&
+        velocity.current.lengthSq() < 0.02 &&
+        angularVelocity.current.lengthSq() < 0.02
+      ) {
+        velocity.current.set(0, 0, 0);
+        angularVelocity.current.set(0, 0, 0);
+      }
+
+      // Apply to mesh
+      groupRef.current.position.copy(position.current);
+      groupRef.current.rotation.copy(rotation.current);
+    } else {
+      // Standard Placement Animation
+      const tension = 0.12;
+      const damping = 0.6;
+
+      const scaleDiff = 1 - scaleRef.current;
+      if (Math.abs(scaleDiff) > 0.001 || Math.abs(scaleVel.current) > 0.001) {
+        scaleVel.current += scaleDiff * tension;
+        scaleVel.current *= damping;
+        scaleRef.current += scaleVel.current;
+        groupRef.current.scale.setScalar(scaleRef.current);
+      }
+
+      const yDiff = 0 - yOffsetRef.current;
+      if (Math.abs(yDiff) > 0.001 || Math.abs(yVel.current) > 0.001) {
+        yVel.current += yDiff * tension;
+        yVel.current *= damping;
+        yOffsetRef.current += yVel.current;
+        groupRef.current.position.y = initialPosY + yOffsetRef.current;
+      } else {
+        groupRef.current.position.y = initialPosY;
+      }
+
+      // Ensure exact placement if not dynamic
+      groupRef.current.position.x = initialPosX;
+      groupRef.current.position.z = initialPosZ;
+      groupRef.current.rotation.set(0, 0, 0);
     }
   });
 
   return (
-    <group ref={groupRef} position={[posX, posY, posZ]}>
+    <group ref={groupRef} position={[initialPosX, initialPosY, initialPosZ]}>
       <RoundedBox args={sizeArgs} radius={0.05} smoothness={4}>
         <meshStandardMaterial
           color={materialColor}
@@ -278,10 +548,31 @@ export const GameScene: React.FC<GameSceneProps> = ({
   winningCells,
 }) => {
   const dragStart = useRef({ x: 0, y: 0 });
-  const controlsRef = useRef<any>(null); // Ref to access OrbitControls
+  const controlsRef = useRef<any>(null);
+
+  // Physics / Explosion State
+  const [explosion, setExplosion] = useState<{
+    position: THREE.Vector3;
+    time: number;
+  } | null>(null);
+
+  // Physics Registry for Block-Block Collisions
+  const physicsRegistry = useRef(new Map<string, PhysicsObject>());
+
+  // Reset explosion when blocks are cleared (New Game)
+  useEffect(() => {
+    if (blocks.length === 0) {
+      setExplosion(null);
+      physicsRegistry.current.clear();
+    }
+  }, [blocks.length]);
 
   const handlePointerInteraction = (e: any) => {
     e.stopPropagation();
+    if (winningCells || (ghost === null && blocks.length > 0 && !ghost)) {
+      // If game over, maybe show cursor change?
+    }
+
     const point = e.point;
     const gridX = Math.round(point.x / CUBE_SIZE);
     onHover(gridX);
@@ -297,6 +588,16 @@ export const GameScene: React.FC<GameSceneProps> = ({
     const dy = e.nativeEvent.clientY - dragStart.current.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > 10) return;
+
+    // Check if game is won/drawn
+    if (winningCells || (blocks.length > 0 && !ghost)) {
+      // Explode!
+      setExplosion({
+        position: e.point.clone(),
+        time: Date.now(),
+      });
+      return;
+    }
 
     const point = e.point;
     const gridX = Math.round(point.x / CUBE_SIZE);
@@ -332,7 +633,7 @@ export const GameScene: React.FC<GameSceneProps> = ({
       }
 
       // Geometric Center X
-      targetX = ((minX + maxX) / 2) * CUBE_SIZE + CUBE_SIZE * 0.25; // Minor adjustment for improved centering feeling
+      targetX = ((minX + maxX) / 2) * CUBE_SIZE + CUBE_SIZE * 0.25; // Minor adjustment
 
       // Center Y - We calculate the visual center of the structure
       const structureCenterY = ((minY + maxY) / 2) * CUBE_SIZE;
@@ -362,9 +663,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
     const dy = newTy - currentTarget.y;
     currentTarget.y = newTy;
     cameraPos.y += dy;
-
-    // Since we manually modified camera and target, OrbitControls needs to know?
-    // Actually Drei OrbitControls updates on frame, but modifying target directly is standard.
   });
 
   return (
@@ -392,15 +690,19 @@ export const GameScene: React.FC<GameSceneProps> = ({
         {blocks.map((b) => (
           <Block3D
             key={b.id}
+            id={b.id}
             x={b.x}
             y={b.y}
             orientation={b.orientation}
             color={b.player === "white" ? COLORS.white : COLORS.black}
+            explosion={explosion}
+            physicsRegistry={physicsRegistry}
           />
         ))}
 
-        {ghost && (
+        {ghost && !winningCells && (
           <Block3D
+            id="ghost"
             x={ghost.x}
             y={ghost.y}
             orientation={ghost.orientation}

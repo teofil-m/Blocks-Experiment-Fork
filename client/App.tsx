@@ -9,6 +9,7 @@ import {
   applyBlockToGrid,
   checkWin,
   rebuildGridFromBlocks,
+  hasValidMove,
 } from "@/utils/gameLogic";
 import {
   GridState,
@@ -33,7 +34,7 @@ const formatTime = (seconds: number) => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
-const SERVER_URL =
+const ZS_SERVER_URL =
   (import.meta as any).env?.VITE_SERVER_URL || "http://localhost:3000";
 
 function App() {
@@ -42,10 +43,20 @@ function App() {
   const [grid, setGrid] = useState<GridState>(createEmptyGrid());
   const [blocks, setBlocks] = useState<BlockData[]>([]);
   const [currentPlayer, setCurrentPlayer] = useState<Player>("white");
-  const [winner, setWinner] = useState<Player | null>(null);
+  const [winner, setWinner] = useState<Player | "draw" | null>(null);
   const [winningCells, setWinningCells] = useState<
     { x: number; y: number }[] | null
   >(null);
+
+  // --- Player Names ---
+  const [myName, setMyName] = useState("Player");
+  const [whiteName, setWhiteName] = useState("White");
+  const [blackName, setBlackName] = useState("Black");
+
+  // Local setup state
+  const [localWhiteName, setLocalWhiteName] = useState("Player 1");
+  const [localBlackName, setLocalBlackName] = useState("Player 2");
+  const [showLocalSetup, setShowLocalSetup] = useState(false);
 
   // --- Timer State ---
   const [whiteTime, setWhiteTime] = useState(INITIAL_TIME_SECONDS);
@@ -75,7 +86,7 @@ function App() {
 
   // --- Timer Interval ---
   useEffect(() => {
-    if (winner || isInLobby) return;
+    if (winner || isInLobby || showLocalSetup) return;
     const interval = setInterval(() => {
       const active = currentPlayerRef.current;
       if (active === "white") {
@@ -98,7 +109,7 @@ function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [winner, isInLobby]);
+  }, [winner, isInLobby, showLocalSetup]);
 
   // --- Network Logic ---
   useEffect(() => {
@@ -113,7 +124,7 @@ function App() {
     if (socketRef.current?.connected) return socketRef.current;
 
     setConnectionStatus("connecting");
-    const socket = io(SERVER_URL, {
+    const socket = io(ZS_SERVER_URL, {
       transports: ["websocket"],
       reconnectionAttempts: 5,
     });
@@ -137,16 +148,23 @@ function App() {
       setMyPlayer("white");
     });
 
-    socket.on("game_start", ({ whiteId, blackId }) => {
-      console.log("Game Started!");
-      setConnectionStatus("connected");
-      setIsInLobby(false);
-      if (socket.id === blackId) {
-        setNetworkRole("client");
-        setMyPlayer("black");
+    socket.on(
+      "game_start",
+      ({ whiteId, blackId, whiteName: sWhiteName, blackName: sBlackName }) => {
+        console.log("Game Started!", sWhiteName, sBlackName);
+        setConnectionStatus("connected");
+        setIsInLobby(false);
+
+        setWhiteName(sWhiteName || "White");
+        setBlackName(sBlackName || "Black");
+
+        if (socket.id === blackId) {
+          setNetworkRole("client");
+          setMyPlayer("black");
+        }
+        internalReset();
       }
-      internalReset();
-    });
+    );
 
     socket.on("game_action", (data: any) => {
       handleNetworkAction(data);
@@ -170,17 +188,25 @@ function App() {
   };
 
   const startHost = () => {
+    if (!myName.trim()) {
+      alert("Please enter your name first");
+      return;
+    }
     const socket = connectSocket();
     if (socket) {
-      socket.emit("create_room");
+      socket.emit("create_room", { playerName: myName });
     }
   };
 
   const joinGame = (inputRoomId: string) => {
+    if (!myName.trim()) {
+      alert("Please enter your name first");
+      return;
+    }
     const socket = connectSocket();
     if (socket) {
       setRoomId(inputRoomId);
-      socket.emit("join_room", inputRoomId);
+      socket.emit("join_room", { roomId: inputRoomId, playerName: myName });
     }
   };
 
@@ -203,7 +229,7 @@ function App() {
 
   const handleNetworkAction = (data: any) => {
     if (data.type === "MOVE") {
-      const { block, nextPlayer, wTime, bTime } = data;
+      const { block, nextPlayer, wTime, bTime, isDraw } = data;
       setBlocks((prev) => {
         const newBlocks = [...prev, block];
         // Rebuild grid fully from blocks to ensure sync and consistency with Map state
@@ -214,6 +240,8 @@ function App() {
         if (win) {
           setWinner(block.player);
           setWinningCells(win);
+        } else if (isDraw) {
+          setWinner("draw");
         }
 
         setGrid(newGrid); // Sync grid state
@@ -292,12 +320,35 @@ function App() {
 
     const winResult = checkWin(newGrid, currentPlayer);
     let nextPlayer: Player = currentPlayer === "white" ? "black" : "white";
+    let isDraw = false;
 
     if (winResult) {
       setWinner(currentPlayer);
       setWinningCells(winResult);
     } else {
-      setCurrentPlayer(nextPlayer);
+      // Check for draw condition (if neither player can move)
+      const nextCanMove = hasValidMove(newGrid, nextPlayer);
+      if (!nextCanMove) {
+        // If next player cannot move, check if current player can move
+        const currentCanMove = hasValidMove(newGrid, currentPlayer);
+        if (!currentCanMove) {
+          // NEITHER can move => Draw
+          setWinner("draw");
+          isDraw = true;
+        } else {
+          // Next player cannot move, but current player can.
+          // Standard: turn passes to nextPlayer, they are stuck.
+          // Optional: Pass logic.
+          // For simplicity and adherence to "Draw if neither":
+          // We let the turn switch. The next player will be unable to move, essentially trapping the game
+          // until they timeout OR if we add a pass.
+          // However, if we don't switch turns, we must handle the UI for "You go again".
+          // Let's switch turn for now. If user wants skip logic, they can ask.
+        }
+      }
+      if (!isDraw) {
+        setCurrentPlayer(nextPlayer);
+      }
     }
 
     if (gameMode === "online") {
@@ -307,6 +358,7 @@ function App() {
         nextPlayer,
         wTime: newWhiteTime,
         bTime: newBlackTime,
+        isDraw,
       });
     }
   }, [
@@ -342,14 +394,14 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isInLobby) return;
+      if (isInLobby || showLocalSetup) return;
       if (e.code === "Space" || e.key === "r" || e.key === "R") {
         handleRotate();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleRotate, isInLobby]);
+  }, [handleRotate, isInLobby, showLocalSetup]);
 
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
@@ -360,7 +412,71 @@ function App() {
     return () => window.removeEventListener("contextmenu", handleContextMenu);
   }, [handleRotate]);
 
-  // --- Render Lobby (UNCHANGED) ---
+  // --- Start Local Game ---
+  const startLocalGame = () => {
+    setGameMode("local");
+    setWhiteName(localWhiteName || "Player 1");
+    setBlackName(localBlackName || "Player 2");
+    setShowLocalSetup(false);
+    setIsInLobby(false);
+    internalReset();
+  };
+
+  // --- Render Local Setup ---
+  if (showLocalSetup) {
+    return (
+      <div className="w-full h-screen bg-gray-900 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700 animate-in fade-in zoom-in duration-300">
+          <h2 className="text-2xl font-bold text-white text-center mb-6">
+            Local Game Setup
+          </h2>
+          <div className="space-y-4 mb-6">
+            <div>
+              <label className="block text-gray-400 text-sm mb-1">
+                White Player (First)
+              </label>
+              <input
+                type="text"
+                value={localWhiteName}
+                onChange={(e) => setLocalWhiteName(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-600 text-white px-4 py-2 rounded-lg focus:outline-none focus:border-amber-500"
+                placeholder="Enter name"
+              />
+            </div>
+            <div>
+              <label className="block text-gray-400 text-sm mb-1">
+                Black Player
+              </label>
+              <input
+                type="text"
+                value={localBlackName}
+                onChange={(e) => setLocalBlackName(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-600 text-white px-4 py-2 rounded-lg focus:outline-none focus:border-amber-500"
+                placeholder="Enter name"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowLocalSetup(false)}
+              className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl transition"
+            >
+              Back
+            </button>
+            <button
+              onClick={startLocalGame}
+              className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition shadow-lg"
+            >
+              Start Game
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Render Lobby ---
   if (isInLobby) {
     return (
       <div className="w-full h-screen bg-gray-900 flex items-center justify-center p-4">
@@ -374,10 +490,7 @@ function App() {
 
           <div className="space-y-4">
             <button
-              onClick={() => {
-                setGameMode("local");
-                setIsInLobby(false);
-              }}
+              onClick={() => setShowLocalSetup(true)}
               className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition shadow-lg flex items-center justify-center gap-2"
             >
               <svg
@@ -402,6 +515,21 @@ function App() {
                 Online Multiplayer
               </span>
               <div className="flex-grow border-t border-gray-700"></div>
+            </div>
+
+            {/* Online Name Input */}
+            <div className="mb-2">
+              <label className="block text-gray-400 text-xs mb-1 ml-1">
+                Your Name
+              </label>
+              <input
+                type="text"
+                value={myName}
+                onChange={(e) => setMyName(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-600 text-white px-4 py-2 rounded-lg focus:outline-none focus:border-indigo-500 text-center"
+                placeholder="Enter your name"
+                maxLength={12}
+              />
             </div>
 
             {connectionStatus === "error" && (
@@ -524,6 +652,9 @@ function App() {
               )}
             </div>
             <div className="flex flex-col">
+              <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">
+                {whiteName}
+              </span>
               <span
                 className={`font-mono text-xl font-bold ${
                   whiteTime < 30 ? "text-red-400" : "text-white"
@@ -556,6 +687,9 @@ function App() {
             }`}
           >
             <div className="flex flex-col items-end">
+              <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">
+                {blackName}
+              </span>
               <span
                 className={`font-mono text-xl font-bold ${
                   blackTime < 30 ? "text-red-400" : "text-white"
@@ -610,16 +744,28 @@ function App() {
         <div className="absolute top-28 left-1/2 transform -translate-x-1/2 pointer-events-none z-20 animate-in fade-in zoom-in duration-500">
           <div className="bg-gradient-to-br from-green-500/90 to-emerald-600/90 backdrop-blur-md px-10 py-6 rounded-2xl shadow-2xl border-2 border-green-300/50 flex flex-col items-center">
             <h2 className="text-4xl md:text-6xl font-extrabold text-white drop-shadow-md whitespace-nowrap">
-              {winner === "white" ? "WHITE" : "BLACK"} WINS!
+              {winner === "draw"
+                ? "GAME DRAWN"
+                : `${
+                    winner === "white"
+                      ? whiteName.toUpperCase()
+                      : blackName.toUpperCase()
+                  } WINS!`}
             </h2>
             <div className="text-green-50 text-sm font-bold tracking-widest uppercase mt-2">
-              {whiteTime === 0 || blackTime === 0 ? "ON TIME" : "BY CHECKMATE"}
+              {winner === "draw"
+                ? "NO MOVES POSSIBLE"
+                : whiteTime === 0 || blackTime === 0
+                ? "ON TIME"
+                : "BY CHECKMATE"}
             </div>
-            {gameMode === "online" && winner === myPlayer && (
-              <div className="mt-2 text-xs bg-white/20 px-2 py-1 rounded text-white font-bold">
-                VICTORY
-              </div>
-            )}
+            {gameMode === "online" &&
+              winner !== "draw" &&
+              winner === myPlayer && (
+                <div className="mt-2 text-xs bg-white/20 px-2 py-1 rounded text-white font-bold">
+                  VICTORY
+                </div>
+              )}
           </div>
         </div>
       )}
@@ -629,7 +775,8 @@ function App() {
           <div className="hidden md:block text-white/50 text-xs bg-black/40 px-3 py-1 rounded backdrop-blur-sm">
             {gameMode === "online" && currentPlayer !== myPlayer ? (
               <span className="text-yellow-400 animate-pulse">
-                Opponent is thinking...
+                {currentPlayer === "white" ? whiteName : blackName} is
+                thinking...
               </span>
             ) : (
               <span>Rotate: Right Click / Space • Place: Left Click</span>

@@ -14,7 +14,7 @@ const getCell = (
   return grid.get(`${x},${y}`);
 };
 
-// Helper to reconstruct grid from block history (useful for network sync)
+// Helper to reconstruct grid from blocks (useful for network sync)
 export const rebuildGridFromBlocks = (blocks: BlockData[]): GridState => {
   const grid = createEmptyGrid();
   for (const block of blocks) {
@@ -238,6 +238,33 @@ export const validateMove = (
   }
 
   return true;
+};
+
+export const hasValidMove = (grid: GridState, player: Player): boolean => {
+  // If grid is empty, player can place anywhere (typically around 0 for UI sanity, but valid logic allows 0)
+  if (grid.size === 0) return true;
+
+  const { minX, maxX } = getGridBounds(grid);
+
+  // We iterate through a range of X values that could possibly form a valid move.
+  // The max width is GRID_SIZE (9).
+  // A new block could extend the bounds to the left or right, up to the limit.
+  // We safely check a range slightly larger than the current bounds to catch all possibilities.
+  // Range [minX - 9, maxX + 9] is more than sufficient.
+
+  const startX = minX - GRID_SIZE;
+  const endX = maxX + GRID_SIZE;
+
+  for (let x = startX; x <= endX; x++) {
+    for (const orientation of ["vertical", "horizontal"] as Orientation[]) {
+      const y = findDropPosition(grid, x, orientation);
+      if (validateMove(grid, x, y, orientation, player)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 };
 
 export const checkWin = (

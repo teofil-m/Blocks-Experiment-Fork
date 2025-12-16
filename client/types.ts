@@ -34,6 +34,15 @@ export interface GameState {
   history: BlockData[]; // For undo potential (not implemented yet but good structure)
 }
 
+export interface PlayerStats {
+  totalMatches: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  avgMatchTime: number;
+  avgBlocks: number;
+}
+
 // --- Network Types ---
 
 export type GameMode = "local" | "online";

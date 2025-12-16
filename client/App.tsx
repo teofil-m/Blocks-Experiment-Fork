@@ -26,6 +26,7 @@ import {
   GameMode,
   NetworkRole,
   NetworkMessage,
+  PlayerStats,
 } from "@/types";
 import {
   INITIAL_CAMERA_POSITION,
@@ -44,6 +45,114 @@ const formatTime = (seconds: number) => {
 const ZS_SERVER_URL =
   (import.meta as any).env?.VITE_SERVER_URL || "http://localhost:3000";
 
+// --- Player Card Modal ---
+const PlayerCardModal = ({
+  player,
+  name,
+  stats,
+  onClose,
+}: {
+  player: Player;
+  name: string;
+  stats: PlayerStats;
+  onClose: () => void;
+}) => {
+  const winRate =
+    stats.totalMatches > 0
+      ? Math.round((stats.wins / stats.totalMatches) * 100)
+      : 0;
+  const avgTime = Math.round(stats.avgMatchTime / 60);
+  const avgBlocks = Math.round(stats.avgBlocks * 10) / 10;
+
+  const borderColor =
+    player === "white" ? "border-amber-500/50" : "border-gray-500/50";
+  const textColor = player === "white" ? "text-amber-400" : "text-gray-300";
+  const avatarColor = player === "white" ? "bg-amber-600" : "bg-gray-700";
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300"
+      onClick={onClose}
+    >
+      <div
+        className={`relative w-full max-w-sm bg-gray-900 border-2 ${borderColor} rounded-2xl p-8 shadow-2xl transform transition-all scale-100 animate-in zoom-in-95 duration-300`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-500 hover:text-white transition"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+
+        <div className="flex flex-col items-center mb-8">
+          <div
+            className={`w-20 h-20 rounded-full flex items-center justify-center text-3xl font-bold shadow-lg mb-4 ${avatarColor} text-white ring-4 ring-black`}
+          >
+            {name.charAt(0).toUpperCase()}
+          </div>
+          <h2 className={`text-2xl font-bold ${textColor}`}>{name}</h2>
+          <div className="text-xs font-mono text-gray-500 uppercase tracking-widest mt-1">
+            Player Statistics
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-gray-800/50 rounded-xl p-4 flex flex-col items-center justify-center border border-gray-700">
+            <span className="text-2xl font-mono font-bold text-white">
+              {stats.totalMatches}
+            </span>
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider mt-1">
+              Matches
+            </span>
+          </div>
+          <div className="bg-gray-800/50 rounded-xl p-4 flex flex-col items-center justify-center border border-gray-700">
+            <span
+              className={`text-2xl font-mono font-bold ${
+                winRate >= 50 ? "text-green-400" : "text-orange-400"
+              }`}
+            >
+              {winRate}%
+            </span>
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider mt-1">
+              Win Rate
+            </span>
+          </div>
+          <div className="bg-gray-800/50 rounded-xl p-4 flex flex-col items-center justify-center border border-gray-700">
+            <span className="text-xl font-mono font-bold text-white">
+              {stats.wins} - {stats.losses}
+            </span>
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider mt-1">
+              W - L
+            </span>
+          </div>
+          <div className="bg-gray-800/50 rounded-xl p-4 flex flex-col items-center justify-center border border-gray-700">
+            <span className="text-xl font-mono font-bold text-white">
+              {avgBlocks}
+            </span>
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider mt-1">
+              Avg Blocks
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const [grid, setGrid] = useState<GridState>(createEmptyGrid());
   const [blocks, setBlocks] = useState<BlockData[]>([]);
@@ -60,13 +169,19 @@ function App() {
   const [whiteName, setWhiteName] = useState("White");
   const [blackName, setBlackName] = useState("Black");
 
+  const [whiteStats, setWhiteStats] = useState<PlayerStats | null>(null);
+  const [blackStats, setBlackStats] = useState<PlayerStats | null>(null);
+
+  // State for the modal
+  const [viewStatsPlayer, setViewStatsPlayer] = useState<Player | null>(null);
+  const hasShownStatsRef = useRef(false);
+
   const [localWhiteName, setLocalWhiteName] = useState("Player 1");
   const [localBlackName, setLocalBlackName] = useState("Player 2");
   const [showLocalSetup, setShowLocalSetup] = useState(false);
 
   const [whiteTime, setWhiteTime] = useState(INITIAL_TIME_SECONDS);
   const [blackTime, setBlackTime] = useState(INITIAL_TIME_SECONDS);
-  const [gameStartTime, setGameStartTime] = useState<number | null>(null);
 
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [orientation, setOrientation] = useState<Orientation>("vertical");
@@ -108,58 +223,6 @@ function App() {
     }
   }, [winner]);
 
-  // Save match to database when game ends
-  useEffect(() => {
-    if (winner && gameStartTime) {
-      // Only save once: in local mode or if we're the white player in online mode
-      const shouldSave =
-        gameMode === "local" || (gameMode === "online" && myPlayer === "white");
-
-      if (!shouldSave) return;
-
-      const matchEndTime = Date.now();
-      const matchDurationSeconds = Math.round(
-        (matchEndTime - gameStartTime) / 1000
-      );
-
-      // Count blocks for each player
-      const whiteBlocks = blocks.filter((b) => b.player === "white").length;
-      const blackBlocks = blocks.filter((b) => b.player === "black").length;
-
-      const matchData = {
-        whiteName: gameMode === "local" ? localWhiteName : whiteName,
-        blackName: gameMode === "local" ? localBlackName : blackName,
-        winner: winner, // "white", "black", or "draw"
-        matchTime: matchDurationSeconds, // in seconds
-        whiteNumberOfBlocks: whiteBlocks,
-        blackNumberOfBlocks: blackBlocks,
-        matchEndTimestamp: new Date(matchEndTime).toISOString(),
-      };
-
-      // Connect socket if needed for local games
-      if (gameMode === "local" && !socketRef.current?.connected) {
-        const socket = connectSocket();
-        socket.once("connect", () => {
-          socket.emit("save_match", matchData);
-          console.log("Match saved (local):", matchData);
-        });
-      } else if (socketRef.current?.connected) {
-        socketRef.current.emit("save_match", matchData);
-        console.log("Match saved:", matchData);
-      }
-    }
-  }, [
-    winner,
-    gameStartTime,
-    blocks,
-    gameMode,
-    localWhiteName,
-    localBlackName,
-    whiteName,
-    blackName,
-    myPlayer,
-  ]);
-
   useEffect(() => {
     if (winner || isInLobby || showLocalSetup) return;
     const interval = setInterval(() => {
@@ -185,6 +248,21 @@ function App() {
 
     return () => clearInterval(interval);
   }, [winner, isInLobby, showLocalSetup]);
+
+  // Auto-show opponent stats on game start (only once)
+  useEffect(() => {
+    if (gameMode === "online" && !isInLobby && !hasShownStatsRef.current) {
+      const opponent = myPlayer === "white" ? "black" : "white";
+      // Only show if we have stats for them
+      if (opponent === "white" && whiteStats) {
+        setViewStatsPlayer("white");
+        hasShownStatsRef.current = true;
+      } else if (opponent === "black" && blackStats) {
+        setViewStatsPlayer("black");
+        hasShownStatsRef.current = true;
+      }
+    }
+  }, [isInLobby, gameMode, myPlayer, whiteStats, blackStats]);
 
   useEffect(() => {
     return () => {
@@ -221,18 +299,31 @@ function App() {
       setNetworkRole("host");
       setMyPlayer("white");
       setChatMessages([]); // Clear chat when creating a new room
+      setWhiteStats(null);
+      setBlackStats(null);
+      hasShownStatsRef.current = false;
     });
 
     socket.on(
       "game_start",
-      ({ whiteId, blackId, whiteName: sWhiteName, blackName: sBlackName }) => {
+      ({
+        whiteId,
+        blackId,
+        whiteName: sWhiteName,
+        blackName: sBlackName,
+        whiteStats: wStats,
+        blackStats: bStats,
+      }) => {
         console.log("Game Started!", sWhiteName, sBlackName);
         setConnectionStatus("connected");
         setIsInLobby(false);
-        setGameStartTime(Date.now());
 
         setWhiteName(sWhiteName || "White");
         setBlackName(sBlackName || "Black");
+        setWhiteStats(wStats);
+        setBlackStats(bStats);
+
+        hasShownStatsRef.current = false; // Allow auto-show for new game
 
         if (socket.id === blackId) {
           setNetworkRole("client");
@@ -246,7 +337,6 @@ function App() {
         setOpponentRematchRequested(false);
 
         internalReset();
-        // Note: We DO NOT clear chat here to allow persistence during rematch
       }
     );
 
@@ -272,7 +362,8 @@ function App() {
       internalReset();
       setWhiteScore(0);
       setBlackScore(0);
-      setChatMessages([]); // Clear chat if session ends abruptly
+      setChatMessages([]);
+      hasShownStatsRef.current = false;
     });
 
     socket.on("error", ({ message }) => {
@@ -309,7 +400,7 @@ function App() {
       socket.emit("join_room", { roomId: inputRoomId, playerName: myName });
       setWhiteScore(0);
       setBlackScore(0);
-      setChatMessages([]); // Clear chat when joining a new room
+      setChatMessages([]);
     }
   };
 
@@ -322,7 +413,7 @@ function App() {
     setConnectionStatus("idle");
     setNetworkRole(null);
     setRoomId("");
-    setChatMessages([]); // Clear chat when explicitly leaving/canceling
+    setChatMessages([]);
   };
 
   const sendNetworkAction = (action: any) => {
@@ -485,7 +576,6 @@ function App() {
     setHoverX(null);
     setWhiteTime(INITIAL_TIME_SECONDS);
     setBlackTime(INITIAL_TIME_SECONDS);
-    setGameStartTime(Date.now());
   };
 
   const handleReset = () => {
@@ -521,11 +611,12 @@ function App() {
     setGameMode("local");
     setWhiteName(localWhiteName || "Player 1");
     setBlackName(localBlackName || "Player 2");
+    setWhiteStats(null);
+    setBlackStats(null);
     setShowLocalSetup(false);
     setIsInLobby(false);
     setWhiteScore(0);
     setBlackScore(0);
-    setGameStartTime(Date.now());
     internalReset();
   };
 
@@ -538,7 +629,7 @@ function App() {
 
   if (showLocalSetup) {
     return (
-      <div className="w-full h-screen bg-gray-900 flex items-center justify-center p-4">
+      <div className="w-full h-[100dvh] bg-gray-900 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700 animate-in fade-in zoom-in duration-300">
           <h2 className="text-2xl font-bold text-white text-center mb-6">
             Local Game Setup
@@ -591,7 +682,7 @@ function App() {
 
   if (isInLobby) {
     return (
-      <div className="w-full h-screen bg-gray-900 flex items-center justify-center p-4">
+      <div className="w-full h-[100dvh] bg-gray-900 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700">
           <h1 className="text-4xl font-bold text-white text-center mb-2 tracking-wider">
             BLOCKS 3D
@@ -723,7 +814,17 @@ function App() {
   }
 
   return (
-    <div className="relative w-full h-screen bg-gray-900 font-sans select-none overflow-hidden touch-none">
+    <div className="relative w-full h-[100dvh] bg-gray-900 font-sans select-none overflow-hidden touch-none">
+      {/* Player Stats Modal */}
+      {viewStatsPlayer && (
+        <PlayerCardModal
+          player={viewStatsPlayer}
+          name={viewStatsPlayer === "white" ? whiteName : blackName}
+          stats={viewStatsPlayer === "white" ? whiteStats! : blackStats!}
+          onClose={() => setViewStatsPlayer(null)}
+        />
+      )}
+
       <Canvas
         shadows
         camera={{ position: INITIAL_CAMERA_POSITION, fov: 45 }}
@@ -743,14 +844,15 @@ function App() {
 
       <div className="absolute top-0 left-0 w-full p-4 pointer-events-none z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="bg-black/80 backdrop-blur-md px-6 py-3 rounded-xl text-white shadow-xl border border-white/10 flex items-center gap-6 md:gap-8 min-w-[300px] justify-between">
+          {/* White Player Info */}
           <div
-            className={`flex items-center gap-3 transition-opacity duration-300 ${
+            className={`flex items-center gap-3 transition-opacity duration-300 relative group ${
               currentPlayer === "white" && !winner
                 ? "opacity-100 scale-105"
                 : "opacity-40"
             }`}
           >
-            <div className="relative">
+            <div className="relative cursor-help">
               <div
                 className={`w-4 h-4 rounded-full bg-amber-600 shadow-sm ${
                   currentPlayer === "white" && !winner
@@ -767,6 +869,28 @@ function App() {
                 <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">
                   {whiteName}
                 </span>
+                {gameMode === "online" && whiteStats && (
+                  <button
+                    onClick={() => setViewStatsPlayer("white")}
+                    className="pointer-events-auto text-gray-500 hover:text-white transition p-1 hover:bg-white/10 rounded"
+                    title="View Stats"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                  </button>
+                )}
                 <span className="text-xs bg-gray-700 px-1.5 rounded text-white">
                   {whiteScore}
                 </span>
@@ -795,8 +919,9 @@ function App() {
             )}
           </div>
 
+          {/* Black Player Info */}
           <div
-            className={`flex items-center gap-3 transition-opacity duration-300 ${
+            className={`flex items-center gap-3 transition-opacity duration-300 relative group ${
               currentPlayer === "black" && !winner
                 ? "opacity-100 scale-105"
                 : "opacity-40"
@@ -807,6 +932,28 @@ function App() {
                 <span className="text-xs bg-gray-700 px-1.5 rounded text-white">
                   {blackScore}
                 </span>
+                {gameMode === "online" && blackStats && (
+                  <button
+                    onClick={() => setViewStatsPlayer("black")}
+                    className="pointer-events-auto text-gray-500 hover:text-white transition p-1 hover:bg-white/10 rounded"
+                    title="View Stats"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                  </button>
+                )}
                 <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">
                   {blackName}
                 </span>
@@ -824,7 +971,7 @@ function App() {
                 </span>
               )}
             </div>
-            <div className="relative">
+            <div className="relative cursor-help">
               <div
                 className={`w-4 h-4 rounded-full bg-neutral-800 border border-gray-500 shadow-sm ${
                   currentPlayer === "black" && !winner
@@ -899,7 +1046,7 @@ function App() {
       )}
 
       {gameMode === "online" && !isInLobby && !winner && (
-        <div className="absolute bottom-20 right-4 pointer-events-auto z-50">
+        <div className="absolute bottom-32 right-4 pointer-events-auto z-50">
           {!isChatOpen && (
             <button
               onClick={() => {
@@ -942,7 +1089,7 @@ function App() {
         />
       )}
 
-      <div className="absolute bottom-0 left-0 w-full p-4 pointer-events-none z-10 flex flex-col items-center gap-4 pb-8 md:pb-4">
+      <div className="absolute bottom-0 left-0 w-full p-4 pointer-events-none z-10 flex flex-col items-center gap-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pb-4">
         {!winner && (
           <div className="hidden md:block text-white/50 text-xs bg-black/40 px-3 py-1 rounded backdrop-blur-sm">
             {gameMode === "online" && currentPlayer !== myPlayer ? (

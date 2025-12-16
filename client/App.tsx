@@ -54,6 +54,10 @@ function App() {
     { x: number; y: number }[] | null
   >(null);
 
+  // --- Score State ---
+  const [whiteScore, setWhiteScore] = useState(0);
+  const [blackScore, setBlackScore] = useState(0);
+
   // --- Player Names ---
   const [myName, setMyName] = useState("Player");
   const [whiteName, setWhiteName] = useState("White");
@@ -83,12 +87,25 @@ function App() {
   const [isInLobby, setIsInLobby] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // --- Rematch State ---
+  const [rematchRequested, setRematchRequested] = useState(false);
+  const [opponentRematchRequested, setOpponentRematchRequested] =
+    useState(false);
+
   const socketRef = useRef<Socket | null>(null);
 
   const currentPlayerRef = useRef<Player>(currentPlayer);
   useEffect(() => {
     currentPlayerRef.current = currentPlayer;
   }, [currentPlayer]);
+
+  // --- Score Tracking ---
+  useEffect(() => {
+    if (winner && winner !== "draw") {
+      if (winner === "white") setWhiteScore((s) => s + 1);
+      else setBlackScore((s) => s + 1);
+    }
+  }, [winner]);
 
   // --- Timer Interval ---
   useEffect(() => {
@@ -167,7 +184,14 @@ function App() {
         if (socket.id === blackId) {
           setNetworkRole("client");
           setMyPlayer("black");
+        } else {
+          setNetworkRole("host");
+          setMyPlayer("white");
         }
+
+        // Reset rematch flags on game start
+        setRematchRequested(false);
+        setOpponentRematchRequested(false);
         internalReset();
       }
     );
@@ -176,11 +200,17 @@ function App() {
       handleNetworkAction(data);
     });
 
+    socket.on("rematch_requested", () => {
+      setOpponentRematchRequested(true);
+    });
+
     socket.on("opponent_left", () => {
       alert("Opponent disconnected.");
       setConnectionStatus("idle");
       setIsInLobby(true);
       internalReset();
+      setWhiteScore(0);
+      setBlackScore(0);
     });
 
     socket.on("error", ({ message }) => {
@@ -201,6 +231,8 @@ function App() {
     const socket = connectSocket();
     if (socket) {
       socket.emit("create_room", { playerName: myName });
+      setWhiteScore(0);
+      setBlackScore(0);
     }
   };
 
@@ -213,6 +245,8 @@ function App() {
     if (socket) {
       setRoomId(inputRoomId);
       socket.emit("join_room", { roomId: inputRoomId, playerName: myName });
+      setWhiteScore(0);
+      setBlackScore(0);
     }
   };
 
@@ -230,6 +264,13 @@ function App() {
   const sendNetworkAction = (action: any) => {
     if (socketRef.current && connectionStatus === "connected") {
       socketRef.current.emit("game_action", { roomId, ...action });
+    }
+  };
+
+  const requestRematch = () => {
+    if (socketRef.current && roomId) {
+      setRematchRequested(true);
+      socketRef.current.emit("request_rematch", { roomId });
     }
   };
 
@@ -268,8 +309,6 @@ function App() {
 
     if (gameMode === "online" && currentPlayer !== myPlayer) return null;
 
-    // No clamping needed now, board is infinite.
-    // Just use hoverX directly.
     const validX = hoverX;
 
     const targetY = findDropPosition(grid, validX, orientation);
@@ -332,24 +371,13 @@ function App() {
       setWinner(currentPlayer);
       setWinningCells(winResult);
     } else {
-      // Check for draw condition (if neither player can move)
+      // Check for draw condition
       const nextCanMove = hasValidMove(newGrid, nextPlayer);
       if (!nextCanMove) {
-        // If next player cannot move, check if current player can move
         const currentCanMove = hasValidMove(newGrid, currentPlayer);
         if (!currentCanMove) {
-          // NEITHER can move => Draw
           setWinner("draw");
           isDraw = true;
-        } else {
-          // Next player cannot move, but current player can.
-          // Standard: turn passes to nextPlayer, they are stuck.
-          // Optional: Pass logic.
-          // For simplicity and adherence to "Draw if neither":
-          // We let the turn switch. The next player will be unable to move, essentially trapping the game
-          // until they timeout OR if we add a pass.
-          // However, if we don't switch turns, we must handle the UI for "You go again".
-          // Let's switch turn for now. If user wants skip logic, they can ask.
         }
       }
       if (!isDraw) {
@@ -425,6 +453,8 @@ function App() {
     setBlackName(localBlackName || "Player 2");
     setShowLocalSetup(false);
     setIsInLobby(false);
+    setWhiteScore(0);
+    setBlackScore(0);
     internalReset();
   };
 
@@ -647,6 +677,7 @@ function App() {
       {/* Top HUD with Timers */}
       <div className="absolute top-0 left-0 w-full p-4 pointer-events-none z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="bg-black/80 backdrop-blur-md px-6 py-3 rounded-xl text-white shadow-xl border border-white/10 flex items-center gap-6 md:gap-8 min-w-[300px] justify-between">
+          {/* White Player */}
           <div
             className={`flex items-center gap-3 transition-opacity duration-300 ${
               currentPlayer === "white" && !winner
@@ -667,9 +698,15 @@ function App() {
               )}
             </div>
             <div className="flex flex-col">
-              <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">
-                {whiteName}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">
+                  {whiteName}
+                </span>
+                {/* Score */}
+                <span className="text-xs bg-gray-700 px-1.5 rounded text-white">
+                  {whiteScore}
+                </span>
+              </div>
               <span
                 className={`font-mono text-xl font-bold ${
                   whiteTime < 30 ? "text-red-400" : "text-white"
@@ -694,6 +731,7 @@ function App() {
             )}
           </div>
 
+          {/* Black Player */}
           <div
             className={`flex items-center gap-3 transition-opacity duration-300 ${
               currentPlayer === "black" && !winner
@@ -702,9 +740,15 @@ function App() {
             }`}
           >
             <div className="flex flex-col items-end">
-              <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">
-                {blackName}
-              </span>
+              <div className="flex items-center gap-2">
+                {/* Score */}
+                <span className="text-xs bg-gray-700 px-1.5 rounded text-white">
+                  {blackScore}
+                </span>
+                <span className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-0.5">
+                  {blackName}
+                </span>
+              </div>
               <span
                 className={`font-mono text-xl font-bold ${
                   blackTime < 30 ? "text-red-400" : "text-white"
@@ -738,6 +782,8 @@ function App() {
             onClick={() => {
               cancelHosting();
               setIsInLobby(true);
+              setWhiteScore(0);
+              setBlackScore(0);
               internalReset();
             }}
             className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition text-sm font-medium border border-red-500/20 backdrop-blur-md"
@@ -866,33 +912,86 @@ function App() {
               </button>
             </>
           ) : (
-            <button
-              onClick={() => {
-                if (gameMode === "local") handleReset();
-                else {
-                  cancelHosting();
-                  setIsInLobby(true);
-                }
-              }}
-              className="w-full h-16 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white text-xl font-bold rounded-2xl shadow-xl transition-all transform hover:scale-[1.02] flex items-center justify-center gap-3"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-8 w-8"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              {gameMode === "local" ? "PLAY AGAIN" : "RETURN TO LOBBY"}
-            </button>
+            <div className="w-full flex gap-3">
+              {gameMode === "local" ? (
+                <button
+                  onClick={handleReset}
+                  className="w-full h-16 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white text-xl font-bold rounded-2xl shadow-xl transition-all transform hover:scale-[1.02] flex items-center justify-center gap-3"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-8 w-8"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                  </svg>
+                  PLAY AGAIN
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      cancelHosting();
+                      setIsInLobby(true);
+                      setWhiteScore(0);
+                      setBlackScore(0);
+                    }}
+                    className="flex-1 h-16 bg-gray-700/80 hover:bg-gray-600/80 backdrop-blur-md text-white text-lg font-bold rounded-2xl shadow-xl transition-all border border-white/10"
+                  >
+                    EXIT
+                  </button>
+                  <button
+                    onClick={requestRematch}
+                    disabled={rematchRequested}
+                    className={`flex-[2] h-16 text-white text-xl font-bold rounded-2xl shadow-xl transition-all transform hover:scale-[1.02] flex items-center justify-center gap-3 ${
+                      rematchRequested
+                        ? "bg-amber-800/80 cursor-default"
+                        : "bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600"
+                    }`}
+                  >
+                    {rematchRequested ? (
+                      <span>WAITING FOR OPPONENT...</span>
+                    ) : (
+                      <>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-8 w-8"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                          />
+                        </svg>
+                        REMATCH
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
           )}
+          {winner &&
+            opponentRematchRequested &&
+            !rematchRequested &&
+            gameMode === "online" && (
+              <div className="absolute -top-12 left-0 w-full text-center">
+                <span className="bg-blue-600 text-white px-4 py-2 rounded-full shadow-lg font-bold animate-bounce text-sm">
+                  Opponent wants a rematch!
+                </span>
+              </div>
+            )}
         </div>
       </div>
     </div>

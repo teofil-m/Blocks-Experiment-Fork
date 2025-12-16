@@ -23,7 +23,9 @@ const rooms = new Map();
 //   whiteName: string,
 //   black: socketId,
 //   blackName: string,
-//   spectators: []
+//   spectators: [],
+//   whiteRematch: boolean,
+//   blackRematch: boolean
 // }
 
 io.on("connection", (socket) => {
@@ -41,6 +43,8 @@ io.on("connection", (socket) => {
       black: null,
       blackName: null,
       spectators: [],
+      whiteRematch: false,
+      blackRematch: false,
     });
 
     socket.join(roomId);
@@ -87,6 +91,43 @@ io.on("connection", (socket) => {
     // Relay to everyone else in the room
     console.log(`Relaying action in room ${roomId}:`, type, data);
     socket.to(roomId).emit("game_action", { type, ...data });
+  });
+
+  socket.on("request_rematch", ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    if (socket.id === room.white) room.whiteRematch = true;
+    if (socket.id === room.black) room.blackRematch = true;
+
+    // Notify others that a rematch was requested
+    socket.to(roomId).emit("rematch_requested");
+
+    // If both agreed
+    if (room.whiteRematch && room.blackRematch) {
+      // Swap roles
+      const tempId = room.white;
+      room.white = room.black;
+      room.black = tempId;
+
+      const tempName = room.whiteName;
+      room.whiteName = room.blackName;
+      room.blackName = tempName;
+
+      // Reset flags
+      room.whiteRematch = false;
+      room.blackRematch = false;
+
+      console.log(`Rematch starting in room ${roomId}. Swapping roles.`);
+
+      // Restart game with swapped roles
+      io.to(roomId).emit("game_start", {
+        whiteId: room.white,
+        blackId: room.black,
+        whiteName: room.whiteName,
+        blackName: room.blackName,
+      });
+    }
   });
 
   socket.on("leave_room", (roomId) => {

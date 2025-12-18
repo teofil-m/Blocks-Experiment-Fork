@@ -1,5 +1,6 @@
 export const GRID_SIZE = 9; // Max width constraint
 export const WIN_LENGTH = 5;
+export const MAX_BLOCKS_PER_PLAYER = 20; // Max blocks each player can place
 
 // Visual scaling
 export const CUBE_SIZE = 1;

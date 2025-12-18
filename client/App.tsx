@@ -36,6 +36,7 @@ import {
   INITIAL_TIME_SECONDS,
   INCREMENT_SECONDS,
   TIME_PRESETS,
+  MAX_BLOCKS_PER_PLAYER,
 } from "@/constants";
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -688,17 +689,30 @@ function App() {
 
   const handleNetworkAction = (data: any) => {
     if (data.type === "MOVE") {
-      const { block, nextPlayer, wTime, bTime, isDraw } = data;
+      const { block, nextPlayer, wTime, bTime, isDraw, gameEnded } = data;
       setBlocks((prev) => {
         const newBlocks = [...prev, block];
         const newGrid = rebuildGridFromBlocks(newBlocks);
 
+        // Count blocks for each player
+        const whiteBlockCount = newBlocks.filter(b => b.player === "white").length;
+        const blackBlockCount = newBlocks.filter(b => b.player === "black").length;
+        
         const win = checkWin(newGrid, block.player);
         if (win) {
           setWinner(block.player);
           setWinningCells(win);
         } else if (isDraw) {
           setWinner("draw");
+        } else if (gameEnded) {
+          // Game ended due to no valid moves - determine winner
+          const nextCanMove = hasValidMove(newGrid, nextPlayer);
+          const nextPlayerBlockCount = nextPlayer === "white" ? whiteBlockCount : blackBlockCount;
+          
+          if (!nextCanMove && nextPlayerBlockCount < MAX_BLOCKS_PER_PLAYER) {
+            // Next player can't move and hasn't exhausted blocks - they lose
+            setWinner(block.player);
+          }
         }
 
         setGrid(newGrid);
@@ -808,20 +822,53 @@ function App() {
     const winResult = checkWin(newGrid, currentPlayer);
     let nextPlayer: Player = currentPlayer === "white" ? "black" : "white";
     let isDraw = false;
+    let gameEnded = false;
 
     if (winResult) {
       setWinner(currentPlayer);
       setWinningCells(winResult);
+      gameEnded = true;
     } else {
+      // Count blocks for each player
+      const whiteBlockCount = newBlocks.filter(b => b.player === "white").length;
+      const blackBlockCount = newBlocks.filter(b => b.player === "black").length;
+      
+      // Check if next player can move
       const nextCanMove = hasValidMove(newGrid, nextPlayer);
+      const nextPlayerBlockCount = nextPlayer === "white" ? whiteBlockCount : blackBlockCount;
+      
       if (!nextCanMove) {
-        const currentCanMove = hasValidMove(newGrid, currentPlayer);
-        if (!currentCanMove) {
-          setWinner("draw");
-          isDraw = true;
+        // If next player has reached max blocks, check if current player can move
+        if (nextPlayerBlockCount >= MAX_BLOCKS_PER_PLAYER) {
+          const currentCanMove = hasValidMove(newGrid, currentPlayer);
+          const currentPlayerBlockCount = currentPlayer === "white" ? whiteBlockCount : blackBlockCount;
+          
+          if (!currentCanMove || currentPlayerBlockCount >= MAX_BLOCKS_PER_PLAYER) {
+            // Both players exhausted - draw
+            setWinner("draw");
+            isDraw = true;
+            gameEnded = true;
+          }
+          // else: only next player exhausted, game continues (shouldn't happen but handle gracefully)
+        } else {
+          // Next player has no valid moves but hasn't used all blocks - they lose
+          setWinner(currentPlayer);
+          gameEnded = true;
+        }
+      } else {
+        // Next player can move - check if current player has exhausted their blocks
+        const currentPlayerBlockCount = currentPlayer === "white" ? whiteBlockCount : blackBlockCount;
+        if (currentPlayerBlockCount >= MAX_BLOCKS_PER_PLAYER) {
+          const currentCanMove = hasValidMove(newGrid, currentPlayer);
+          if (!currentCanMove) {
+            // Current player exhausted, next player wins
+            setWinner(nextPlayer);
+            gameEnded = true;
+          }
         }
       }
-      if (!isDraw) {
+      
+      if (!gameEnded) {
         setCurrentPlayer(nextPlayer);
       }
     }
@@ -834,6 +881,7 @@ function App() {
         wTime: newWhiteTime,
         bTime: newBlackTime,
         isDraw,
+        gameEnded,
       });
     }
   };
@@ -1384,6 +1432,9 @@ function App() {
               >
                 {isTimed ? formatTime(whiteTime) : "∞"}
               </span>
+              <span className="text-[10px] text-gray-400 font-mono">
+                {blocks.filter(b => b.player === "white").length}/{MAX_BLOCKS_PER_PLAYER} blocks
+              </span>
               {(gameMode === "online" || gameMode === "ai") && (
                 <span className="text-[10px] text-gray-500 uppercase">
                   {gameMode === "ai"
@@ -1457,6 +1508,9 @@ function App() {
                 }`}
               >
                 {isTimed ? formatTime(blackTime) : "∞"}
+              </span>
+              <span className="text-[10px] text-gray-400 font-mono">
+                {blocks.filter(b => b.player === "black").length}/{MAX_BLOCKS_PER_PLAYER} blocks
               </span>
               {(gameMode === "online" || gameMode === "ai") && (
                 <span className="text-[10px] text-gray-500 uppercase">

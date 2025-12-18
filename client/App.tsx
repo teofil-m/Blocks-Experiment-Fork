@@ -395,10 +395,12 @@ function App() {
         matchEndTimestamp: new Date(matchEndTime).toISOString(),
       };
 
-      if (
-        (gameMode === "local" || gameMode === "ai") &&
-        !socketRef.current?.connected
-      ) {
+      // Don't save games with AI opponents
+      if (gameMode === "ai") {
+        return;
+      }
+
+      if (gameMode === "local" && !socketRef.current?.connected) {
         const socket = connectSocket();
         socket.once("connect", () => {
           socket.emit("save_match", matchData);

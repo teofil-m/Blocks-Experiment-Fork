@@ -45,7 +45,7 @@ const TutorialVisual = ({
             loop
             muted
             playsInline
-            className={`w-full h-full object-cover absolute inset-0 transition-opacity duration-500 ${
+            className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-500 ${
               !isLoading && !hasError ? "opacity-100" : "opacity-0"
             }`}
             onLoadedData={() => {
@@ -62,7 +62,7 @@ const TutorialVisual = ({
             key={mediaSrc}
             src={mediaSrc}
             alt="Tutorial Visual"
-            className={`w-full h-full object-cover absolute inset-0 transition-opacity duration-500 ${
+            className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-500 ${
               !isLoading && !hasError ? "opacity-100" : "opacity-0"
             }`}
             onLoad={() => {
@@ -76,8 +76,8 @@ const TutorialVisual = ({
           />
         ))}
 
-      {/* Fallback Content (shown if mediaSrc is missing, failing, or while loading) */}
-      {(!mediaSrc || hasError || isLoading) && (
+      {/* Fallback Content (shown if mediaSrc is missing or failed to load) */}
+      {(!mediaSrc || hasError) && (
         <div className="absolute inset-0 w-full h-full animate-in fade-in duration-300 bg-gray-900/40">
           <div className="absolute inset-0 opacity-20 pointer-events-none">
             <svg width="100%" height="100%">
@@ -103,13 +103,6 @@ const TutorialVisual = ({
           <div className="relative z-10 w-full h-full flex items-center justify-center">
             {children}
           </div>
-
-          {/* Optional Loading Indicator */}
-          {isLoading && !hasError && (
-            <div className="absolute bottom-2 right-2">
-              <div className="w-4 h-4 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -126,7 +119,7 @@ export const Tutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
       title: "Objective",
       content: (
         <div className="space-y-4">
-          <TutorialVisual mediaSrc="/assets/tutorial_win.png">
+          <TutorialVisual mediaSrc="/assets/Win Condition.png">
             <svg viewBox="0 0 300 140" className="w-full h-full p-2">
               <defs>
                 <linearGradient
@@ -287,7 +280,7 @@ export const Tutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
       content: (
         <div className="space-y-4">
           <TutorialVisual
-            mediaSrc="/assets/tutorial_constraint.mp4"
+            mediaSrc="/assets/end to end constraint.mp4"
             mediaType="video"
           >
             <div className="flex justify-around items-end w-full px-2 h-full pb-4">

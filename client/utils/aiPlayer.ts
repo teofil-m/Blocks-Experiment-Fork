@@ -16,10 +16,11 @@ import {
 
 const SCORES = {
   WIN: 100000,
-  FOUR: 500,
-  THREE: 50,
-  TWO: 5,
-  CENTER: 2,
+  FOUR_IN_ROW: 1000,
+  THREE_IN_ROW: 100,
+  TWO_IN_ROW: 10,
+  CENTER: 3,
+  CONNECTIVITY: 5,
 };
 
 const getHeuristicScore = (grid: GridState, player: Player): number => {
@@ -41,39 +42,60 @@ const getHeuristicScore = (grid: GridState, player: Player): number => {
       }
     }
 
+    // Score for player's potential winning lines
     if (playerCount > 0 && opponentCount === 0) {
       if (playerCount === 5) return SCORES.WIN;
-      if (playerCount === 4) return SCORES.FOUR;
-      if (playerCount === 3) return SCORES.THREE;
-      if (playerCount === 2) return SCORES.TWO;
+      if (playerCount === 4) return SCORES.FOUR_IN_ROW;
+      if (playerCount === 3) return SCORES.THREE_IN_ROW;
+      if (playerCount === 2) return SCORES.TWO_IN_ROW;
     }
+
+    // Score for blocking opponent's potential winning lines (weighted higher)
     if (opponentCount > 0 && playerCount === 0) {
       if (opponentCount === 5) return -SCORES.WIN;
-      if (opponentCount === 4) return -SCORES.FOUR * 1.5; // Prioritize blocking
-      if (opponentCount === 3) return -SCORES.THREE;
-      if (opponentCount === 2) return -SCORES.TWO;
+      if (opponentCount === 4) return -SCORES.FOUR_IN_ROW * 2; // Critical to block!
+      if (opponentCount === 3) return -SCORES.THREE_IN_ROW * 1.5; // Important to block
+      if (opponentCount === 2) return -SCORES.TWO_IN_ROW;
     }
     return 0;
   };
 
   const { minX, maxX } = getGridBounds(grid);
-  const startX = minX - 1;
-  const endX = maxX + 1;
+  const startX = minX - 2;
+  const endX = maxX + 2;
   const startY = 0;
   const endY = GRID_SIZE;
 
   for (let x = startX; x <= endX; x++) {
     for (let y = startY; y <= endY; y++) {
-      score += checkLine(x, y, 1, 0); // H
-      score += checkLine(x, y, 0, 1); // V
-      score += checkLine(x, y, 1, 1); // D1
-      score += checkLine(x, y, 1, -1); // D2
+      score += checkLine(x, y, 1, 0); // Horizontal
+      score += checkLine(x, y, 0, 1); // Vertical
+      score += checkLine(x, y, 1, 1); // Diagonal down-right
+      score += checkLine(x, y, 1, -1); // Diagonal up-right
 
-      // Central preference
+      // Central positioning bonus
       const cell = grid.get(`${x},${y}`);
       if (cell && cell.player === player) {
-        const distFromCenter = Math.abs(x - 0);
+        const distFromCenter = Math.abs(x);
         score += Math.max(0, 5 - distFromCenter) * SCORES.CENTER;
+
+        // Bonus for connectivity (pieces adjacent to other pieces)
+        let adjacentCount = 0;
+        const adjacent = [
+          [x + 1, y],
+          [x - 1, y],
+          [x, y + 1],
+          [x, y - 1],
+          [x + 1, y + 1],
+          [x - 1, y - 1],
+          [x + 1, y - 1],
+          [x - 1, y + 1],
+        ];
+        for (const [ax, ay] of adjacent) {
+          const adjCell = grid.get(`${ax},${ay}`);
+          if (adjCell && adjCell.player === player) adjacentCount++;
+        }
+        score += adjacentCount * SCORES.CONNECTIVITY;
       }
     }
   }
@@ -86,8 +108,8 @@ const getAllPossibleMoves = (grid: GridState, player: Player): BlockData[] => {
   const { minX, maxX } = getGridBounds(grid);
 
   // Search range expanded to possible next valid placements
-  const startX = grid.size === 0 ? 0 : minX - 1;
-  const endX = grid.size === 0 ? 0 : maxX + 1;
+  const startX = grid.size === 0 ? 0 : minX - 2;
+  const endX = grid.size === 0 ? 0 : maxX + 2;
 
   const orientations: Orientation[] = ["vertical", "horizontal"];
 
@@ -157,12 +179,48 @@ export const getBestMove = (
   if (moves.length === 0) return null;
 
   if (difficulty === "easy") {
-    // Random move from valid moves
-    return moves[Math.floor(Math.random() * moves.length)];
+    // Easy: 70% random, 30% semi-smart
+    if (Math.random() < 0.7) {
+      return moves[Math.floor(Math.random() * moves.length)];
+    }
   }
 
-  // Medium or Hard: Search
-  const depth = difficulty === "medium" ? 1 : 2;
+  // Check for immediate win first
+  for (const move of moves) {
+    const newGrid = applyBlockToGrid(grid, move);
+    if (checkWin(newGrid, player)) {
+      return move; // Take the winning move!
+    }
+  }
+
+  // Check for immediate block of opponent win
+  const opponent = player === "white" ? "black" : "white";
+  for (const move of moves) {
+    // Simulate opponent's moves from current position
+    const opponentMoves = getAllPossibleMoves(grid, opponent);
+    for (const oppMove of opponentMoves) {
+      const testGrid = applyBlockToGrid(grid, oppMove);
+      if (checkWin(testGrid, opponent)) {
+        // Opponent can win next turn! Check if our move blocks it
+        const ourGrid = applyBlockToGrid(grid, move);
+        const opponentMovesAfter = getAllPossibleMoves(ourGrid, opponent);
+        let canStillWin = false;
+        for (const oppMove2 of opponentMovesAfter) {
+          const testGrid2 = applyBlockToGrid(ourGrid, oppMove2);
+          if (checkWin(testGrid2, opponent)) {
+            canStillWin = true;
+            break;
+          }
+        }
+        if (!canStillWin) {
+          return move; // This blocks their win!
+        }
+      }
+    }
+  }
+
+  // Medium or Hard: Use minimax with appropriate depth
+  const depth = difficulty === "easy" ? 1 : difficulty === "medium" ? 2 : 3;
   let bestScore = -Infinity;
   let bestMove = moves[0];
 

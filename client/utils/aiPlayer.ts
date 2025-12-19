@@ -182,8 +182,8 @@ export const getBestMove = (
   const shuffledMoves = [...moves].sort(() => Math.random() - 0.5);
 
   if (difficulty === "easy") {
-    // Easy: 80% random, 20% semi-smart (increased randomness)
-    if (Math.random() < 0.8) {
+    // Easy: 85% random, 15% semi-smart (increased randomness)
+    if (Math.random() < 0.85) {
       return shuffledMoves[Math.floor(Math.random() * shuffledMoves.length)];
     }
   }
@@ -234,9 +234,9 @@ export const getBestMove = (
 
   // Medium or Hard: Use minimax with appropriate depth
   // Add randomness based on difficulty
-  const depth = difficulty === "easy" ? 1 : difficulty === "medium" ? 2 : 4; // Increased hard depth
+  const depth = difficulty === "easy" ? 1 : difficulty === "medium" ? 1 : 3; // Reduced medium from 2 to 1, hard from 4 to 3
   const randomnessFactor =
-    difficulty === "easy" ? 0.3 : difficulty === "medium" ? 0.15 : 0.05;
+    difficulty === "easy" ? 0.3 : difficulty === "medium" ? 0.25 : 0.08; // Increased medium randomness
 
   const topMoves: { move: BlockData; score: number }[] = [];
 
@@ -261,11 +261,18 @@ export const getBestMove = (
   // For medium difficulty, add randomness by considering top moves within a threshold
   if (difficulty === "medium") {
     // Use absolute difference for threshold to handle negative scores correctly
-    const scoreDiff = Math.abs(bestScore * 0.1); // 10% difference
+    const scoreDiff = Math.abs(bestScore * 0.2); // 20% difference - increased for more variety
     const goodMoves = topMoves.filter((m) => m.score >= bestScore - scoreDiff);
 
+    // Add occasional suboptimal moves for more human-like play
+    if (Math.random() < 0.15) {
+      // 15% chance to pick from top 5 moves
+      const topN = topMoves.slice(0, Math.min(5, topMoves.length));
+      return topN[Math.floor(Math.random() * topN.length)].move;
+    }
+
     if (goodMoves.length > 1 && Math.random() < randomnessFactor * 2) {
-      // 30% chance to pick a random good move instead of the best
+      // 50% chance to pick a random good move instead of the best
       return goodMoves[Math.floor(Math.random() * goodMoves.length)].move;
     }
     return goodMoves[0].move;
@@ -273,16 +280,23 @@ export const getBestMove = (
 
   // For hard difficulty, occasionally pick from top 2-3 moves
   if (difficulty === "hard") {
+    // Add very occasional suboptimal move for realism
+    if (Math.random() < 0.05) {
+      // 5% chance to pick from top 3 moves
+      const topN = topMoves.slice(0, Math.min(3, topMoves.length));
+      return topN[Math.floor(Math.random() * topN.length)].move;
+    }
+
     // Use absolute difference for threshold to handle negative scores correctly
-    const scoreDiff = Math.abs(bestScore * 0.05); // 5% difference
+    const scoreDiff = Math.abs(bestScore * 0.08); // 8% difference - slightly more lenient
     const topCandidates = topMoves.filter(
       (m) => m.score >= bestScore - scoreDiff
     );
 
-    if (topCandidates.length > 1 && Math.random() < randomnessFactor) {
-      // Small chance to add variety even on hard
+    if (topCandidates.length > 1 && Math.random() < randomnessFactor * 2) {
+      // Increased chance to add variety
       return topCandidates[
-        Math.floor(Math.random() * Math.min(topCandidates.length, 2))
+        Math.floor(Math.random() * Math.min(topCandidates.length, 3))
       ].move;
     }
   }

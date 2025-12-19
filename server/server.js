@@ -5,6 +5,7 @@ import {
   getAllMatches,
   getMatchesByPlayer,
   getPlayerStats,
+  getLeaderboard,
 } from "./db.js";
 
 const PORT = process.env.PORT || 3000;
@@ -18,6 +19,49 @@ const io = new Server(PORT, {
   },
   host: "0.0.0.0",
 });
+
+// HTTP server for REST endpoints
+const httpServer = io.httpServer || io.engine.server;
+
+// Add HTTP endpoint for leaderboard - must be registered before Socket.IO handles requests
+if (httpServer) {
+  const originalEmit = httpServer.emit;
+  httpServer.emit = function (event, req, res) {
+    if (event === "request") {
+      // Only handle our specific endpoint
+      if (req.url === "/leaderboard") {
+        // Handle CORS preflight
+        if (req.method === "OPTIONS") {
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+          res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+          res.writeHead(204);
+          res.end();
+          return;
+        }
+
+        if (req.method === "GET") {
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+          res.setHeader("Content-Type", "application/json");
+
+          getLeaderboard(10)
+            .then((leaderboard) => {
+              res.writeHead(200);
+              res.end(JSON.stringify({ leaderboard }));
+            })
+            .catch((error) => {
+              res.writeHead(500);
+              res.end(JSON.stringify({ error: error.message }));
+            });
+          return;
+        }
+      }
+    }
+    // Let Socket.IO handle all other requests
+    return originalEmit.apply(this, arguments);
+  };
+}
 
 console.log(`Game Server running on port ${PORT}`);
 

@@ -43,6 +43,15 @@ export interface PlayerStats {
   avgBlocks: number;
 }
 
+export interface LeaderboardEntry {
+  playername: string;
+  totalMatches: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  winRate: number;
+}
+
 // --- Network Types ---
 
 export type GameMode = "local" | "online" | "ai";

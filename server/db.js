@@ -138,4 +138,54 @@ export async function getPlayerStats(playerName) {
   return result.rows[0];
 }
 
+/**
+ * Get leaderboard with top players by wins
+ * @param {number} limit - Maximum number of players to return (default: 10)
+ * @returns {Array} Array of player objects with stats
+ */
+export async function getLeaderboard(limit = 10) {
+  const query = `
+    WITH player_names AS (
+      SELECT whiteName as playerName FROM matches
+      UNION
+      SELECT blackName as playerName FROM matches
+    ),
+    player_stats AS (
+      SELECT 
+        pn.playerName,
+        COUNT(m.id)::int as "totalMatches",
+        SUM(CASE 
+          WHEN m.winner = 'white' AND m.whiteName = pn.playerName THEN 1 
+          WHEN m.winner = 'black' AND m.blackName = pn.playerName THEN 1 
+          ELSE 0 
+        END)::int as wins,
+        SUM(CASE WHEN m.winner = 'draw' THEN 1 ELSE 0 END)::int as draws,
+        SUM(CASE 
+          WHEN m.winner = 'white' AND m.blackName = pn.playerName THEN 1 
+          WHEN m.winner = 'black' AND m.whiteName = pn.playerName THEN 1 
+          ELSE 0 
+        END)::int as losses
+      FROM player_names pn
+      LEFT JOIN matches m ON (m.whiteName = pn.playerName OR m.blackName = pn.playerName)
+      GROUP BY pn.playerName
+    )
+    SELECT 
+      playerName,
+      "totalMatches",
+      wins,
+      draws,
+      losses,
+      CASE 
+        WHEN "totalMatches" > 0 THEN ROUND(((wins::float / "totalMatches"::float) * 100)::numeric, 1)
+        ELSE 0 
+      END as "winRate"
+    FROM player_stats
+    WHERE "totalMatches" > 0
+    ORDER BY wins DESC, "winRate" DESC, "totalMatches" DESC
+    LIMIT $1
+  `;
+  const result = await pool.query(query, [limit]);
+  return result.rows;
+}
+
 export default pool;

@@ -10,6 +10,7 @@ import { io, Socket } from "socket.io-client";
 import { GameScene } from "@/components/GameScene";
 import { Chat, ChatMessage } from "@/components/Chat";
 import { Tutorial } from "@/components/Tutorial";
+import { LeaderboardModal } from "@/components/LeaderboardModal";
 import {
   createEmptyGrid,
   findDropPosition,
@@ -30,6 +31,7 @@ import {
   NetworkRole,
   NetworkMessage,
   PlayerStats,
+  LeaderboardEntry,
 } from "@/types";
 import {
   INITIAL_CAMERA_POSITION,
@@ -296,8 +298,9 @@ function App() {
     useState(INITIAL_TIME_SECONDS);
   const [incrementSetting, setIncrementSetting] = useState(INCREMENT_SECONDS);
 
-  // State for the modal
+  // State for modals
   const [viewStatsPlayer, setViewStatsPlayer] = useState<Player | null>(null);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const hasShownStatsRef = useRef(false);
 
   const [localWhiteName, setLocalWhiteName] = useState("Player 1");
@@ -335,6 +338,9 @@ function App() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
 
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => {
@@ -481,6 +487,29 @@ function App() {
       }
     }
   }, [isInLobby, gameMode, myPlayer, whiteStats, blackStats]);
+
+  // Fetch leaderboard when in lobby or leaderboard modal opened
+  const fetchLeaderboard = useCallback(() => {
+    setIsLeaderboardLoading(true);
+    fetch(`${SERVER_URL}/leaderboard`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.leaderboard) {
+          setLeaderboard(data.leaderboard);
+        }
+        setIsLeaderboardLoading(false);
+      })
+      .catch((error) => {
+        console.error("Failed to fetch leaderboard:", error);
+        setIsLeaderboardLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (isInLobby || showLeaderboard) {
+      fetchLeaderboard();
+    }
+  }, [isInLobby, showLeaderboard, fetchLeaderboard]);
 
   useEffect(() => {
     return () => {
@@ -1161,22 +1190,34 @@ function App() {
           isOpen={showTutorial}
           onClose={() => setShowTutorial(false)}
         />
-        <div className="max-w-md w-full bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700">
-          <h1 className="text-4xl font-bold text-white text-center mb-2 tracking-wider">
+
+        <LeaderboardModal
+          isOpen={showLeaderboard}
+          onClose={() => setShowLeaderboard(false)}
+          entries={leaderboard}
+          isLoading={isLeaderboardLoading}
+        />
+
+        {/* Main Menu */}
+        <div className="max-w-md w-full bg-gray-800 p-8 rounded-3xl shadow-2xl border border-gray-700 relative overflow-hidden">
+          {/* Subtle Background Accent */}
+          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-3xl -mr-16 -mt-16 rounded-full"></div>
+
+          <h1 className="text-4xl font-black text-white text-center mb-1 tracking-tight">
             BLOCKS 3D
           </h1>
-          <p className="text-gray-400 text-center mb-6">
-            Structural Strategy Game
+          <p className="text-gray-500 text-center mb-8 uppercase text-[10px] tracking-[0.3em] font-black">
+            Structural Strategy
           </p>
 
-          <div className="flex justify-center mb-6">
+          <div className="flex justify-center gap-6 mb-8">
             <button
               onClick={() => setShowTutorial(true)}
-              className="text-blue-400 text-sm hover:text-blue-300 font-bold flex items-center gap-1 transition-colors"
+              className="text-gray-400 text-xs hover:text-blue-400 font-black flex items-center gap-1.5 transition-all uppercase tracking-widest"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4"
+                className="h-5 w-5"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -1188,7 +1229,27 @@ function App() {
                   d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-              How to Play
+              Guide
+            </button>
+            <button
+              onClick={() => setShowLeaderboard(true)}
+              className="text-gray-400 text-xs hover:text-yellow-400 font-black flex items-center gap-1.5 transition-all uppercase tracking-widest"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                />
+              </svg>
+              Hall of Fame
             </button>
           </div>
 
@@ -1196,70 +1257,75 @@ function App() {
             <div className="grid grid-cols-2 gap-4">
               <button
                 onClick={() => setShowAISetup(true)}
-                className="py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition shadow-lg flex flex-col items-center justify-center gap-2"
+                className="py-5 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl transition shadow-lg flex flex-col items-center justify-center gap-2 group"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-6 w-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                  />
-                </svg>
-                <span className="text-xs uppercase">Solo (AI)</span>
+                <div className="p-2 bg-indigo-700/50 rounded-lg group-hover:scale-110 transition-transform">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                  </svg>
+                </div>
+                <span className="text-[10px] uppercase tracking-widest">
+                  Solo AI
+                </span>
               </button>
 
               <button
                 onClick={() => setShowLocalSetup(true)}
-                className="py-4 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition shadow-lg flex flex-col items-center justify-center gap-2"
+                className="py-5 bg-amber-600 hover:bg-amber-500 text-white font-black rounded-2xl transition shadow-lg flex flex-col items-center justify-center gap-2 group"
               >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 14l-7 7m0 0l-7-7m7 7V3"
-                  />
-                </svg>
-                <span className="text-xs uppercase">Local</span>
+                <div className="p-2 bg-amber-700/50 rounded-lg group-hover:scale-110 transition-transform">
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                    />
+                  </svg>
+                </div>
+                <span className="text-[10px] uppercase tracking-widest">
+                  Local VS
+                </span>
               </button>
             </div>
 
-            <div className="relative flex py-2 items-center">
-              <div className="flex-grow border-t border-gray-700"></div>
-              <span className="flex-shrink mx-4 text-gray-500 text-[10px] uppercase tracking-widest font-bold">
-                Multiplayer
+            <div className="relative flex py-4 items-center">
+              <div className="flex-grow border-t border-gray-700/50"></div>
+              <span className="flex-shrink mx-4 text-gray-500 text-[10px] uppercase tracking-[0.2em] font-black">
+                Online Arena
               </span>
-              <div className="flex-grow border-t border-gray-700"></div>
+              <div className="flex-grow border-t border-gray-700/50"></div>
             </div>
 
             <div className="mb-2">
-              <label className="block text-gray-400 text-xs mb-1 ml-1 uppercase font-bold tracking-tighter">
-                Your Name
-              </label>
               <input
                 type="text"
                 value={myName}
                 onChange={(e) => setMyName(e.target.value)}
-                className="w-full bg-gray-900 border border-gray-600 text-white px-4 py-2 rounded-lg focus:outline-none focus:border-indigo-500 text-center"
-                placeholder="Enter your name"
+                className="w-full bg-gray-900/50 border border-gray-700 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-blue-500 text-center font-bold"
+                placeholder="YOUR NAME"
                 maxLength={12}
               />
             </div>
 
             {connectionStatus === "error" && (
-              <div className="bg-red-500/20 text-red-300 text-xs p-3 rounded-lg border border-red-500/30 mb-2">
+              <div className="bg-red-500/20 text-red-300 text-[10px] p-3 rounded-xl border border-red-500/30 mb-2 uppercase font-bold text-center">
                 {errorMessage || "Connection Error"}
               </div>
             )}
@@ -1280,18 +1346,34 @@ function App() {
                     setGameMode("online");
                     startHost();
                   }}
-                  className="w-full py-3 bg-blue-700 hover:bg-blue-600 text-white font-bold rounded-xl transition shadow-lg flex items-center justify-center gap-2 border border-blue-500/30"
+                  className="w-full py-4 bg-blue-700 hover:bg-blue-600 text-white font-black rounded-2xl transition shadow-xl flex items-center justify-center gap-3 border border-blue-400/20 group"
                 >
-                  Host Online Match
+                  <span className="bg-blue-400/20 p-1.5 rounded-lg group-hover:rotate-12 transition-transform">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                      />
+                    </svg>
+                  </span>
+                  HOST NEW MATCH
                 </button>
 
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="Room Code"
+                    placeholder="ROOM CODE"
                     id="roomInput"
                     maxLength={4}
-                    className="flex-1 bg-gray-900 border border-gray-700 text-white px-4 rounded-xl uppercase tracking-widest text-center focus:outline-none focus:border-indigo-500"
+                    className="flex-1 bg-gray-900/50 border border-gray-700 text-white px-4 rounded-2xl uppercase tracking-[0.3em] text-center font-bold focus:outline-none focus:border-blue-500"
                   />
                   <button
                     onClick={() => {
@@ -1303,36 +1385,54 @@ function App() {
                         joinGame(val);
                       }
                     }}
-                    className="px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl transition"
+                    className="px-8 py-4 bg-gray-700 hover:bg-gray-600 text-white font-black rounded-2xl transition border border-gray-600/50"
                   >
-                    Join
+                    JOIN
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="text-center py-6 bg-gray-900 rounded-xl border border-gray-700 animate-in fade-in zoom-in duration-300">
+              <div className="text-center py-10 bg-gray-900/80 rounded-2xl border border-blue-500/30 animate-in fade-in zoom-in duration-500 shadow-[0_0_40px_rgba(59,130,246,0.1)]">
                 {networkRole === "host" ? (
-                  <div className="space-y-4">
-                    <p className="text-gray-400 text-sm">
-                      Waiting for opponent...
-                    </p>
-                    <div className="text-4xl text-white font-mono font-bold tracking-[0.3em] bg-gray-950/50 py-2 rounded-lg">
+                  <div className="space-y-6">
+                    <div className="space-y-1">
+                      <p className="text-blue-400 text-[10px] font-black uppercase tracking-[0.2em]">
+                        Ready to Build
+                      </p>
+                      <p className="text-gray-400 text-xs">
+                        Awaiting structural opponent...
+                      </p>
+                    </div>
+                    <div className="text-5xl text-white font-mono font-black tracking-[0.3em] bg-gray-950/80 py-4 rounded-2xl mx-6 border border-gray-800 shadow-inner">
                       {roomId}
                     </div>
-                    <p className="text-xs text-gray-500">Share this code</p>
-                    <button
-                      onClick={cancelHosting}
-                      className="text-red-400 text-xs hover:text-red-300 underline"
-                    >
-                      Cancel
-                    </button>
+                    <div className="flex flex-col items-center gap-4">
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(roomId);
+                          alert("Room code copied!");
+                        }}
+                        className="text-blue-500 text-[10px] uppercase font-black hover:text-blue-400 transition tracking-widest bg-blue-500/10 px-4 py-2 rounded-full border border-blue-500/20"
+                      >
+                        Copy Code
+                      </button>
+                      <button
+                        onClick={cancelHosting}
+                        className="text-red-500 text-[10px] uppercase font-black hover:text-red-400 transition tracking-widest"
+                      >
+                        Cancel Match
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <div className="text-white font-bold">Connecting...</div>
+                  <div className="space-y-4">
+                    <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                    <div className="text-white font-black uppercase tracking-widest text-sm">
+                      Synchronizing...
+                    </div>
                     <button
                       onClick={cancelHosting}
-                      className="text-red-400 text-xs hover:text-red-300 underline"
+                      className="text-red-500 text-[10px] uppercase font-black hover:text-red-400 transition tracking-widest"
                     >
                       Cancel
                     </button>

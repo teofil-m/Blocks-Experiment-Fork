@@ -79,6 +79,9 @@ const rooms = new Map();
 //   spectators: [],
 //   whiteRematch: boolean,
 //   blackRematch: boolean,
+//   whiteScore: number,
+//   blackScore: number,
+//   lastWinner: string | null (tracks who won the last game: 'white', 'black', or 'draw'),
 //   timeSettings: { isTimed: boolean, initialTime: number, increment: number },
 //   createdAt: timestamp
 // }
@@ -110,6 +113,9 @@ io.on("connection", (socket) => {
       spectators: [],
       whiteRematch: false,
       blackRematch: false,
+      whiteScore: 0,
+      blackScore: 0,
+      lastWinner: null,
       timeSettings,
       createdAt: Date.now(),
     });
@@ -145,7 +151,9 @@ io.on("connection", (socket) => {
 
     // Check if joining player has the same name as the host
     if (room.whiteName.toLowerCase() === playerName.toLowerCase()) {
-      socket.emit("error", { message: "You cannot use the same name as the host" });
+      socket.emit("error", {
+        message: "You cannot use the same name as the host",
+      });
       return;
     }
 
@@ -177,6 +185,7 @@ io.on("connection", (socket) => {
         whiteStats,
         blackStats,
         timeSettings: room.timeSettings,
+        startingPlayer: "white",
       });
       console.log(
         `Game started in room ${roomId}. ${room.whiteName} vs ${room.blackName}`
@@ -216,16 +225,19 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("rematch_requested");
 
     if (room.whiteRematch && room.blackRematch) {
-      const tempId = room.white;
-      room.white = room.black;
-      room.black = tempId;
-
-      const tempName = room.whiteName;
-      room.whiteName = room.blackName;
-      room.blackName = tempName;
-
+      // Reset rematch flags
       room.whiteRematch = false;
       room.blackRematch = false;
+
+      // Determine starting player: loser of previous match goes first
+      // If previous game was a draw or no previous game, white (host) starts
+      let startingPlayer = "white";
+      if (room.lastWinner === "white") {
+        startingPlayer = "black"; // White won last, so black (loser) starts
+      } else if (room.lastWinner === "black") {
+        startingPlayer = "white"; // Black won last, so white (loser) starts
+      }
+      // If lastWinner is null or "draw", white starts (default)
 
       let whiteStats = null;
       let blackStats = null;
@@ -244,6 +256,7 @@ io.on("connection", (socket) => {
         whiteStats,
         blackStats,
         timeSettings: room.timeSettings,
+        startingPlayer,
       });
     }
   });
@@ -256,6 +269,22 @@ io.on("connection", (socket) => {
       .catch((error) => {
         socket.emit("match_saved", { success: false, error: error.message });
       });
+  });
+
+  socket.on("update_score", ({ roomId, winner }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    // Track the last winner for rematch starting player logic
+    room.lastWinner = winner;
+
+    // Update scores
+    if (winner === "white") {
+      room.whiteScore++;
+    } else if (winner === "black") {
+      room.blackScore++;
+    }
+    // No score update for draw, but lastWinner is still set to "draw"
   });
 
   socket.on("get_matches", (data) => {

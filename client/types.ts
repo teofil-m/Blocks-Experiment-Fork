@@ -58,6 +58,8 @@ export interface RoomInfo {
   isPrivate: boolean;
   playerCount: number;
   maxPlayers: number;
+  spectatorCount: number;
+  isGameInProgress: boolean;
   timeSettings: {
     isTimed: boolean;
     initialTime: number;
@@ -73,9 +75,9 @@ export interface TimeSettings {
 
 // --- Network Types ---
 
-export type GameMode = "local" | "online" | "ai";
+export type GameMode = "local" | "online" | "ai" | "spectator";
 export type AIDifficulty = "easy" | "medium" | "hard";
-export type NetworkRole = "host" | "client" | null;
+export type NetworkRole = "host" | "client" | "spectator" | null;
 
 // SYNC_STATE only sends blocks now; clients reconstruct the grid.
 export type NetworkMessage =
@@ -96,3 +98,29 @@ export type NetworkMessage =
     }
   | { type: "RESET" }
   | { type: "OPPONENT_RESIGNED" };
+
+// --- Spectator Types ---
+
+export interface SpectatorInfo {
+  id: string;
+  name: string;
+}
+
+export interface SpectateJoinedData {
+  roomId: string;
+  spectatorCount: number;
+  whiteName: string | null;
+  blackName: string | null;
+  isGameInProgress: boolean;
+  timeSettings: TimeSettings;
+}
+
+export interface SpectatorJoinedData {
+  spectatorName: string;
+  spectatorCount: number;
+}
+
+export interface SpectatorLeftData {
+  spectatorName: string;
+  spectatorCount: number;
+}

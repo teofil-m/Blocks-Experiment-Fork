@@ -1,23 +1,12 @@
 import React, { useState, useEffect } from "react";
-
-export interface RoomInfo {
-  roomId: string;
-  hostName: string;
-  isPrivate: boolean;
-  playerCount: number;
-  maxPlayers: number;
-  timeSettings: {
-    isTimed: boolean;
-    initialTime: number;
-    increment: number;
-  };
-}
+import { RoomInfo } from "../types";
 
 interface LobbyModalProps {
   isOpen: boolean;
   onClose: () => void;
   rooms: RoomInfo[];
   onJoinRoom: (roomId: string, roomCode?: string) => void;
+  onSpectateRoom: (roomId: string, roomCode?: string) => void;
   isLoading: boolean;
 }
 
@@ -26,11 +15,13 @@ export const LobbyModal: React.FC<LobbyModalProps> = ({
   onClose,
   rooms,
   onJoinRoom,
+  onSpectateRoom,
   isLoading,
 }) => {
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
   const [roomCodeInput, setRoomCodeInput] = useState("");
   const [showCodePrompt, setShowCodePrompt] = useState(false);
+  const [isSpectating, setIsSpectating] = useState(false);
   const [filterPrivate, setFilterPrivate] = useState(false);
 
   useEffect(() => {
@@ -38,6 +29,7 @@ export const LobbyModal: React.FC<LobbyModalProps> = ({
       setSelectedRoom(null);
       setRoomCodeInput("");
       setShowCodePrompt(false);
+      setIsSpectating(false);
     }
   }, [isOpen]);
 
@@ -50,18 +42,34 @@ export const LobbyModal: React.FC<LobbyModalProps> = ({
 
     if (room.isPrivate) {
       setSelectedRoom(room.roomId);
+      setIsSpectating(false);
       setShowCodePrompt(true);
     } else {
       onJoinRoom(room.roomId);
     }
   };
 
+  const handleSpectateClick = (room: RoomInfo) => {
+    if (room.isPrivate) {
+      setSelectedRoom(room.roomId);
+      setIsSpectating(true);
+      setShowCodePrompt(true);
+    } else {
+      onSpectateRoom(room.roomId);
+    }
+  };
+
   const handleCodeSubmit = () => {
     if (selectedRoom && roomCodeInput.trim()) {
-      onJoinRoom(selectedRoom, roomCodeInput.trim().toUpperCase());
+      if (isSpectating) {
+        onSpectateRoom(selectedRoom, roomCodeInput.trim().toUpperCase());
+      } else {
+        onJoinRoom(selectedRoom, roomCodeInput.trim().toUpperCase());
+      }
       setShowCodePrompt(false);
       setRoomCodeInput("");
       setSelectedRoom(null);
+      setIsSpectating(false);
     }
   };
 
@@ -197,20 +205,33 @@ export const LobbyModal: React.FC<LobbyModalProps> = ({
                           <div className="text-gray-400 text-xs font-mono">
                             {room.playerCount}/{room.maxPlayers} players
                           </div>
+                          {room.spectatorCount > 0 && (
+                            <div className="text-purple-400 text-xs font-mono">
+                              {room.spectatorCount} spectator{room.spectatorCount !== 1 ? 's' : ''}
+                            </div>
+                          )}
+                          {room.isGameInProgress && (
+                            <div className="text-green-400 text-xs font-mono">
+                              🎮 In Progress
+                            </div>
+                          )}
                         </div>
-                        <button
-                          onClick={() => handleJoinClick(room)}
-                          disabled={room.playerCount >= room.maxPlayers}
-                          className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition ${
-                            room.playerCount >= room.maxPlayers
-                              ? "bg-gray-700 text-gray-500 cursor-not-allowed"
-                              : "bg-blue-600 text-white hover:bg-blue-700"
-                          }`}
-                        >
-                          {room.playerCount >= room.maxPlayers
-                            ? "Full"
-                            : "Join"}
-                        </button>
+                        <div className="flex gap-2">
+                          {room.playerCount < room.maxPlayers && (
+                            <button
+                              onClick={() => handleJoinClick(room)}
+                              className="px-4 py-2 rounded-lg text-xs font-bold uppercase transition bg-blue-600 text-white hover:bg-blue-700"
+                            >
+                              Join
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleSpectateClick(room)}
+                            className="px-4 py-2 rounded-lg text-xs font-bold uppercase transition bg-purple-600 text-white hover:bg-purple-700"
+                          >
+                            Spectate
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -253,20 +274,33 @@ export const LobbyModal: React.FC<LobbyModalProps> = ({
                           <div className="text-gray-400 text-xs font-mono">
                             {room.playerCount}/{room.maxPlayers} players
                           </div>
+                          {room.spectatorCount > 0 && (
+                            <div className="text-purple-400 text-xs font-mono">
+                              {room.spectatorCount} spectator{room.spectatorCount !== 1 ? 's' : ''}
+                            </div>
+                          )}
+                          {room.isGameInProgress && (
+                            <div className="text-green-400 text-xs font-mono">
+                              🎮 In Progress
+                            </div>
+                          )}
                         </div>
-                        <button
-                          onClick={() => handleJoinClick(room)}
-                          disabled={room.playerCount >= room.maxPlayers}
-                          className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition ${
-                            room.playerCount >= room.maxPlayers
-                              ? "bg-gray-700 text-gray-500 cursor-not-allowed"
-                              : "bg-amber-600 text-white hover:bg-amber-700"
-                          }`}
-                        >
-                          {room.playerCount >= room.maxPlayers
-                            ? "Full"
-                            : "Join"}
-                        </button>
+                        <div className="flex gap-2">
+                          {room.playerCount < room.maxPlayers && (
+                            <button
+                              onClick={() => handleJoinClick(room)}
+                              className="px-4 py-2 rounded-lg text-xs font-bold uppercase transition bg-amber-600 text-white hover:bg-amber-700"
+                            >
+                              Join
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleSpectateClick(room)}
+                            className="px-4 py-2 rounded-lg text-xs font-bold uppercase transition bg-purple-600 text-white hover:bg-purple-700"
+                          >
+                            Spectate
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -295,12 +329,12 @@ export const LobbyModal: React.FC<LobbyModalProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="text-center mb-6">
-              <div className="text-4xl mb-3">🔒</div>
+              <div className="text-4xl mb-3">{isSpectating ? "👁️" : "🔒"}</div>
               <h3 className="text-xl font-bold text-white mb-2">
-                Private Game
+                {isSpectating ? "Spectate Private Game" : "Private Game"}
               </h3>
               <p className="text-gray-400 text-sm">
-                Enter the room code to join this private game
+                Enter the room code to {isSpectating ? "spectate" : "join"} this private game
               </p>
             </div>
 
